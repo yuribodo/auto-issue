@@ -1,6 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import { spawnDaemon, killDaemon } from './daemon'
+import {
+  registerDeepLinkProtocol,
+  handleLogin,
+  handleGetMe,
+  handleLogout,
+} from './auth'
 
 const MOCK_RUNS = [
   {
@@ -65,12 +71,6 @@ const MOCK_RUNS = [
   },
 ]
 
-const MOCK_USER = {
-  login: 'octocat',
-  avatar_url: 'https://github.com/octocat.png',
-  name: 'The Octocat',
-}
-
 const MOCK_CONFIG = {
   apiUrl: 'http://localhost:8080',
   autoApprove: false,
@@ -128,22 +128,23 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('auth:me', () => {
-    return MOCK_USER
+    return handleGetMe()
   })
 
   ipcMain.handle('auth:login', () => {
-    // MVP: no-op, user is always "logged in"
-    mainWindow?.webContents.send('auth:success', MOCK_USER)
+    handleLogin(mainWindow)
   })
 
   ipcMain.handle('auth:logout', () => {
-    // MVP: no-op
+    handleLogout()
   })
 
   ipcMain.handle('daemon:status', () => {
     return { running: false }
   })
 }
+
+registerDeepLinkProtocol()
 
 app.whenReady().then(() => {
   registerIpcHandlers()
