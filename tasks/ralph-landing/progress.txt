@@ -11,6 +11,8 @@ Started: sáb 14 mar 2026 16:50:49 -03
 - Staggered animations: use `.fade-up` class + inline `animationDelay` style
 - `.btn-primary` and `.btn-ghost` are shared button classes in globals.css
 - No lint script — `tsc --noEmit` is the only quality gate
+- Client components ("use client") go in `landing/app/` alongside page.tsx
+- Terminal animation uses setTimeout chain with cleanup via clearTimeout in useEffect return
 
 ## 2026-03-14 - US-001
 - Layout, fonts, and global CSS custom properties verified
@@ -46,4 +48,19 @@ Started: sáb 14 mar 2026 16:50:49 -03
   - Always update prd.json `passes` field in the same commit as the implementation
   - The hero section lives entirely in the default page.tsx export
   - radial-gradient mask on .hero-grid uses `ellipse 60% 60% at 50% 40%` for the fade effect
+---
+
+## 2026-03-14 - US-004
+- Created terminal.tsx client component with 22-second animation loop
+- 10 log lines with staggered delays (0ms to 7800ms), fade-in + translateY animation
+- Status bar: "running" (blue pulsing dot) → "done · PR #87 opened" (green dot)
+- 3-second hold on done state, then clears and restarts
+- Replaced placeholder terminal in page.tsx with Terminal component
+- Updated globals.css: removed placeholder styles, added terminal-box, terminal-line-enter animation, status bar styles
+- Files changed: `landing/app/terminal.tsx` (new), `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - useCallback for the cycle runner prevents stale closure issues in the restart loop
+  - The cleanup function clears both line timeouts AND the restart timeout to prevent memory leaks
+  - Status bar uses --blue for running (purple-ish) and --accent for done (green)
 ---

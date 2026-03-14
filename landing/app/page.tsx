@@ -1,3 +1,5 @@
+import Terminal from "./terminal";
+
 export default function Home() {
   return (
     <main>
@@ -58,19 +60,8 @@ export default function Home() {
             </a>
           </div>
 
-          <div className="hero-terminal-placeholder fade-up" style={{ animationDelay: "400ms" }}>
-            {/* Terminal component will go here in US-004 */}
-            <div className="terminal-placeholder-box">
-              <div className="terminal-titlebar">
-                <span className="terminal-dot" style={{ background: "#ff5f57" }} />
-                <span className="terminal-dot" style={{ background: "#febc2e" }} />
-                <span className="terminal-dot" style={{ background: "#28c840" }} />
-                <span className="terminal-label">auto-issue</span>
-              </div>
-              <div className="terminal-body">
-                <p className="terminal-line">$ awaiting implementation...</p>
-              </div>
-            </div>
+          <div className="hero-terminal fade-up" style={{ animationDelay: "400ms" }}>
+            <Terminal />
           </div>
         </div>
       </section>
