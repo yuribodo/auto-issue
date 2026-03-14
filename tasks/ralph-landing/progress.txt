@@ -8,6 +8,9 @@ Started: sáb 14 mar 2026 16:50:49 -03
 - Design system colors are CSS custom properties in globals.css — never use Tailwind color utilities
 - Badge pattern: `[ LABEL ]` in Azeret Mono, 11px, all-caps, letter-spacing 0.12em
 - No Tailwind config — use raw CSS variables for all theming
+- Staggered animations: use `.fade-up` class + inline `animationDelay` style
+- `.btn-primary` and `.btn-ghost` are shared button classes in globals.css
+- No lint script — `tsc --noEmit` is the only quality gate
 
 ## 2026-03-14 - US-001
 - Layout, fonts, and global CSS custom properties verified
@@ -20,4 +23,15 @@ Started: sáb 14 mar 2026 16:50:49 -03
   - The layout.tsx and globals.css were scaffolded correctly from the start
   - `next/font/google` exports font objects with `.variable` property for CSS variable injection
   - The body className joins all three font variables for global availability
+---
+
+## 2026-03-14 - US-003
+- Added alt-download links (Windows, Linux) below the primary CTA buttons
+- Updated download hrefs to point to GitHub Releases placeholder URLs
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - The hero-ctas div margin-bottom was reduced to make room for alt-download links below
+  - Alt-download links use Azeret Mono 12px with --text-dim / --text-muted colors
+  - Primary CTA and GitHub button already existed from US-002; this story just needed alt-OS links
 ---
