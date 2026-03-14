@@ -80,3 +80,14 @@ Started: sáb 14 mar 2026 16:50:49 -03
   - Shared section styles (.section-label, .section-title) can be reused for the final CTA section
   - Vertical border separators achieved via border-left on non-first items
 ---
+
+## 2026-03-14 - US-006
+- Added final CTA section with top border and subtle blue radial glow
+- Label [ GET STARTED ], title "Ready to stop supervising agents?", subtitle, two buttons
+- Reused .section-label, .section-title, .btn-primary, .btn-ghost classes
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - The glow uses rgba(68, 138, 255, 0.08) — subtle blue, not purple (--blue is #448aff)
+  - Glow positioned at top center with pointer-events: none to avoid blocking clicks
+---

@@ -108,6 +108,34 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Final CTA */}
+      <section className="final-cta">
+        <div className="final-cta-glow" />
+        <div className="final-cta-content">
+          <p className="section-label">[ GET STARTED ]</p>
+          <h2 className="section-title">Ready to stop supervising agents?</h2>
+          <p className="final-cta-subtitle">
+            Connect your repository and watch the first PR open itself.
+          </p>
+          <div className="final-cta-buttons">
+            <a
+              href="https://github.com/auto-issue/auto-issue/releases/latest"
+              className="btn-primary"
+            >
+              Download for macOS →
+            </a>
+            <a
+              href="https://github.com/auto-issue/auto-issue"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-ghost"
+            >
+              View on GitHub
+            </a>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
