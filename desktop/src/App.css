@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #0a0a0a;
+  --bg2: #111111;
+  --bg3: #1a1a1a;
+  --fg: #e0e0e0;
+  --fg-muted: #666666;
+  --accent: #00e676;
+  --accent-flat: rgba(0, 230, 118, 0.08);
+  --border: #222222;
+  --border-mid: #2a2a2a;
+  --amber: #ffab00;
+  --blue: #42a5f5;
+  --red: #ef5350;
+  --purple: #a78bfa;
+  --font-mono: 'Azeret Mono', monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
