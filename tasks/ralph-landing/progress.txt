@@ -1,0 +1,23 @@
+# Ralph Progress Log
+Started: sáb 14 mar 2026 16:50:49 -03
+---
+
+## Codebase Patterns
+- Landing uses Next.js 15 with App Router in `landing/`
+- Fonts loaded via `next/font/google` with CSS variable strategy (--font-syne, --font-azeret, --font-dm)
+- Design system colors are CSS custom properties in globals.css — never use Tailwind color utilities
+- Badge pattern: `[ LABEL ]` in Azeret Mono, 11px, all-caps, letter-spacing 0.12em
+- No Tailwind config — use raw CSS variables for all theming
+
+## 2026-03-14 - US-001
+- Layout, fonts, and global CSS custom properties verified
+- Files: `landing/app/layout.tsx`, `landing/app/globals.css`
+- All fonts correctly imported: Syne (700,800), Azeret Mono (400,500), DM Sans (300,400,500)
+- All CSS custom properties defined: --bg through --blue
+- html/body styled with --bg, --text, DM Sans
+- Typecheck passes
+- **Learnings for future iterations:**
+  - The layout.tsx and globals.css were scaffolded correctly from the start
+  - `next/font/google` exports font objects with `.variable` property for CSS variable injection
+  - The body className joins all three font variables for global availability
+---
