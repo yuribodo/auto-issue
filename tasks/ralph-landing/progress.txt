@@ -91,3 +91,15 @@ Started: sáb 14 mar 2026 16:50:49 -03
   - The glow uses rgba(68, 138, 255, 0.08) — subtle blue, not purple (--blue is #448aff)
   - Glow positioned at top center with pointer-events: none to avoid blocking clicks
 ---
+
+## 2026-03-14 - US-007
+- Added minimal footer with top border and 1.5rem padding
+- Left: "auto-issue · growthway hack 2026", Right: "built with Go + Next.js"
+- Both in Azeret Mono 12px, --text-dim color
+- Responsive: stacks vertically on mobile (max-width: 640px)
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - Footer uses <footer> semantic element inside <main> — simple and correct
+  - All 7 user stories now complete
+---

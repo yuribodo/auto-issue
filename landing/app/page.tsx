@@ -136,6 +136,12 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Footer */}
+      <footer className="footer">
+        <span className="footer-text">auto-issue · growthway hack 2026</span>
+        <span className="footer-text">built with Go + Next.js</span>
+      </footer>
     </main>
   );
 }

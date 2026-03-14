@@ -436,3 +436,27 @@ html {
   gap: 0.75rem;
   justify-content: center;
 }
+
+/* ─── Footer ─── */
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.footer-text {
+  font-family: var(--font-azeret), "Azeret Mono", monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+@media (max-width: 640px) {
+  .footer {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
+  }
+}
