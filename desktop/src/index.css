@@ -1,0 +1,35 @@
+:root {
+  --bg: #0a0a0a;
+  --bg2: #111111;
+  --bg3: #1a1a1a;
+  --text: #e0e0e0;
+  --text-muted: #666666;
+  --accent: #00E676;
+  --accent-flat: rgba(0, 230, 118, 0.1);
+  --border: #222222;
+  --border-mid: #333333;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --blue: #3b82f6;
+
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  color: var(--text);
+  background-color: var(--bg);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}

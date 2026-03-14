@@ -1,0 +1,105 @@
+# Ralph Progress Log
+Started: sáb 14 mar 2026 16:50:49 -03
+---
+
+## Codebase Patterns
+- Landing uses Next.js 15 with App Router in `landing/`
+- Fonts loaded via `next/font/google` with CSS variable strategy (--font-syne, --font-azeret, --font-dm)
+- Design system colors are CSS custom properties in globals.css — never use Tailwind color utilities
+- Badge pattern: `[ LABEL ]` in Azeret Mono, 11px, all-caps, letter-spacing 0.12em
+- No Tailwind config — use raw CSS variables for all theming
+- Staggered animations: use `.fade-up` class + inline `animationDelay` style
+- `.btn-primary` and `.btn-ghost` are shared button classes in globals.css
+- No lint script — `tsc --noEmit` is the only quality gate
+- Client components ("use client") go in `landing/app/` alongside page.tsx
+- Terminal animation uses setTimeout chain with cleanup via clearTimeout in useEffect return
+- Shared section styles: `.section-label` and `.section-title` for consistent section headers
+
+## 2026-03-14 - US-001
+- Layout, fonts, and global CSS custom properties verified
+- Files: `landing/app/layout.tsx`, `landing/app/globals.css`
+- All fonts correctly imported: Syne (700,800), Azeret Mono (400,500), DM Sans (300,400,500)
+- All CSS custom properties defined: --bg through --blue
+- html/body styled with --bg, --text, DM Sans
+- Typecheck passes
+- **Learnings for future iterations:**
+  - The layout.tsx and globals.css were scaffolded correctly from the start
+  - `next/font/google` exports font objects with `.variable` property for CSS variable injection
+  - The body className joins all three font variables for global availability
+---
+
+## 2026-03-14 - US-003
+- Added alt-download links (Windows, Linux) below the primary CTA buttons
+- Updated download hrefs to point to GitHub Releases placeholder URLs
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - The hero-ctas div margin-bottom was reduced to make room for alt-download links below
+  - Alt-download links use Azeret Mono 12px with --text-dim / --text-muted colors
+  - Primary CTA and GitHub button already existed from US-002; this story just needed alt-OS links
+---
+
+## 2026-03-14 - US-002
+- Hero section was already fully implemented in prior commit (18e01f5) but PRD wasn't updated
+- Verified all acceptance criteria against existing code in page.tsx and globals.css
+- Grid background (48px), badge with pulse dot, label, title with accent, subtitle, staggered animations all present
+- Typecheck passes
+- Files: no changes needed — `landing/app/page.tsx`, `landing/app/globals.css` already correct
+- **Learnings for future iterations:**
+  - Always update prd.json `passes` field in the same commit as the implementation
+  - The hero section lives entirely in the default page.tsx export
+  - radial-gradient mask on .hero-grid uses `ellipse 60% 60% at 50% 40%` for the fade effect
+---
+
+## 2026-03-14 - US-004
+- Created terminal.tsx client component with 22-second animation loop
+- 10 log lines with staggered delays (0ms to 7800ms), fade-in + translateY animation
+- Status bar: "running" (blue pulsing dot) → "done · PR #87 opened" (green dot)
+- 3-second hold on done state, then clears and restarts
+- Replaced placeholder terminal in page.tsx with Terminal component
+- Updated globals.css: removed placeholder styles, added terminal-box, terminal-line-enter animation, status bar styles
+- Files changed: `landing/app/terminal.tsx` (new), `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - useCallback for the cycle runner prevents stale closure issues in the restart loop
+  - The cleanup function clears both line timeouts AND the restart timeout to prevent memory leaks
+  - Status bar uses --blue for running (purple-ish) and --accent for done (green)
+---
+
+## 2026-03-14 - US-005
+- Added "How it works" 3-step section below the hero
+- 3-column grid with --border vertical separators (no cards/elevation)
+- Steps: Label the issue (tag icon), Agent takes over (spark icon), Review the PR (checkmark in --accent)
+- Bracket pattern [ 01 ] [ 02 ] [ 03 ] in Azeret Mono, DM Sans for descriptions
+- Responsive: stacks vertically on mobile (max-width: 640px)
+- Added shared .section-label and .section-title classes for reuse in US-006
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - SVG icons inline in JSX need camelCase attributes (strokeWidth, strokeLinecap)
+  - Shared section styles (.section-label, .section-title) can be reused for the final CTA section
+  - Vertical border separators achieved via border-left on non-first items
+---
+
+## 2026-03-14 - US-006
+- Added final CTA section with top border and subtle blue radial glow
+- Label [ GET STARTED ], title "Ready to stop supervising agents?", subtitle, two buttons
+- Reused .section-label, .section-title, .btn-primary, .btn-ghost classes
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - The glow uses rgba(68, 138, 255, 0.08) — subtle blue, not purple (--blue is #448aff)
+  - Glow positioned at top center with pointer-events: none to avoid blocking clicks
+---
+
+## 2026-03-14 - US-007
+- Added minimal footer with top border and 1.5rem padding
+- Left: "auto-issue · growthway hack 2026", Right: "built with Go + Next.js"
+- Both in Azeret Mono 12px, --text-dim color
+- Responsive: stacks vertically on mobile (max-width: 640px)
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - Footer uses <footer> semantic element inside <main> — simple and correct
+  - All 7 user stories now complete
+---
