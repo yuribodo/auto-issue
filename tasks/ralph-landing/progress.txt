@@ -35,3 +35,15 @@ Started: sáb 14 mar 2026 16:50:49 -03
   - Alt-download links use Azeret Mono 12px with --text-dim / --text-muted colors
   - Primary CTA and GitHub button already existed from US-002; this story just needed alt-OS links
 ---
+
+## 2026-03-14 - US-002
+- Hero section was already fully implemented in prior commit (18e01f5) but PRD wasn't updated
+- Verified all acceptance criteria against existing code in page.tsx and globals.css
+- Grid background (48px), badge with pulse dot, label, title with accent, subtitle, staggered animations all present
+- Typecheck passes
+- Files: no changes needed — `landing/app/page.tsx`, `landing/app/globals.css` already correct
+- **Learnings for future iterations:**
+  - Always update prd.json `passes` field in the same commit as the implementation
+  - The hero section lives entirely in the default page.tsx export
+  - radial-gradient mask on .hero-grid uses `ellipse 60% 60% at 50% 40%` for the fade effect
+---
