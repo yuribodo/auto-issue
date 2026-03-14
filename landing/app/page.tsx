@@ -65,6 +65,49 @@ export default function Home() {
           </div>
         </div>
       </section>
+      {/* How It Works */}
+      <section className="how-it-works">
+        <div className="how-it-works-header">
+          <p className="section-label">[ HOW IT WORKS ]</p>
+          <h2 className="section-title">Three steps. Zero babysitting.</h2>
+        </div>
+        <div className="steps-grid">
+          <div className="step">
+            <p className="step-number">[ 01 ]</p>
+            <svg className="step-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+              <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+            <h3 className="step-title">Label the issue</h3>
+            <p className="step-desc">
+              Add the <code>auto-issue</code> label to any GitHub issue.
+              The daemon picks it up within seconds.
+            </p>
+          </div>
+          <div className="step">
+            <p className="step-number">[ 02 ]</p>
+            <svg className="step-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+            </svg>
+            <h3 className="step-title">Agent takes over</h3>
+            <p className="step-desc">
+              The AI clones the repo into an isolated workspace, reads the issue,
+              plans the implementation, and writes the code.
+            </p>
+          </div>
+          <div className="step">
+            <p className="step-number">[ 03 ]</p>
+            <svg className="step-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <h3 className="step-title">Review the PR</h3>
+            <p className="step-desc">
+              Tests pass, lint is clean, and a PR is opened automatically.
+              You just review and merge.
+            </p>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

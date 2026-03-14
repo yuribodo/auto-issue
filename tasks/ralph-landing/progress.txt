@@ -13,6 +13,7 @@ Started: sáb 14 mar 2026 16:50:49 -03
 - No lint script — `tsc --noEmit` is the only quality gate
 - Client components ("use client") go in `landing/app/` alongside page.tsx
 - Terminal animation uses setTimeout chain with cleanup via clearTimeout in useEffect return
+- Shared section styles: `.section-label` and `.section-title` for consistent section headers
 
 ## 2026-03-14 - US-001
 - Layout, fonts, and global CSS custom properties verified
@@ -63,4 +64,19 @@ Started: sáb 14 mar 2026 16:50:49 -03
   - useCallback for the cycle runner prevents stale closure issues in the restart loop
   - The cleanup function clears both line timeouts AND the restart timeout to prevent memory leaks
   - Status bar uses --blue for running (purple-ish) and --accent for done (green)
+---
+
+## 2026-03-14 - US-005
+- Added "How it works" 3-step section below the hero
+- 3-column grid with --border vertical separators (no cards/elevation)
+- Steps: Label the issue (tag icon), Agent takes over (spark icon), Review the PR (checkmark in --accent)
+- Bracket pattern [ 01 ] [ 02 ] [ 03 ] in Azeret Mono, DM Sans for descriptions
+- Responsive: stacks vertically on mobile (max-width: 640px)
+- Added shared .section-label and .section-title classes for reuse in US-006
+- Files changed: `landing/app/page.tsx`, `landing/app/globals.css`
+- Typecheck passes
+- **Learnings for future iterations:**
+  - SVG icons inline in JSX need camelCase attributes (strokeWidth, strokeLinecap)
+  - Shared section styles (.section-label, .section-title) can be reused for the final CTA section
+  - Vertical border separators achieved via border-left on non-first items
 ---
