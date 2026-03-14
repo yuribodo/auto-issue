@@ -1,0 +1,29 @@
+# Ralph Progress Log
+Started: sáb 14 mar 2026 16:50:04 -03
+
+## Codebase Patterns
+- Run `cd desktop && npx tsc --noEmit` to typecheck
+- Types are in `desktop/src/lib/types.ts`, window.electronAPI declaration in `desktop/src/types/electron.d.ts`
+- Electron preload uses contextBridge with generic `invoke` and `on` methods
+- tsconfig includes `src`, `electron`, and `src/types` directories
+- Using vite-plugin-electron for Electron + Vite integration
+
+---
+
+## 2026-03-14 - US-003
+- Implemented Electron preload script with contextBridge exposing `electronAPI` (invoke + on methods)
+- Created TypeScript declaration for `window.electronAPI` in `src/types/electron.d.ts`
+- Also created missing `src/lib/types.ts` (US-001 was marked done but file was missing)
+- Set up `package.json` with Electron, React, Vite, TypeScript deps
+- Set up `tsconfig.json` with bundler module resolution, strict mode
+- Files changed:
+  - `desktop/electron/preload.ts` (new)
+  - `desktop/src/types/electron.d.ts` (new)
+  - `desktop/src/lib/types.ts` (new)
+  - `desktop/package.json` (new)
+  - `desktop/tsconfig.json` (new)
+- **Learnings for future iterations:**
+  - US-001 types.ts was marked as passes:true but never committed — always verify prerequisite files exist
+  - The `on` method in preload returns an unsubscribe function for cleanup
+  - tsconfig needs `"types": ["node"]` for Electron imports to resolve
+---

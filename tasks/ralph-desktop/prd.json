@@ -1,0 +1,288 @@
+{
+  "project": "Auto-Issue Desktop Dashboard",
+  "branchName": "ralph/desktop-dashboard-mvp",
+  "description": "Electron desktop dashboard MVP — login, Kanban board, run detail with live terminal, approve/reject flow using mock data",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Shared TypeScript types",
+      "description": "As a developer, I need the shared TypeScript interfaces so all components have a consistent contract.",
+      "acceptanceCriteria": [
+        "src/lib/types.ts exports RunStatus union type: 'queued' | 'running' | 'awaiting_approval' | 'pr_opened' | 'done' | 'failed'",
+        "src/lib/types.ts exports Run interface with fields: id, issue_number, issue_title, repo, status, provider, model, started_at, turns, test_result, pr_url",
+        "src/lib/types.ts exports SSEEvent interface with fields: type ('log' | 'turn' | 'test' | 'status'), timestamp, prefix, content",
+        "src/lib/types.ts exports User interface with fields: login, avatar_url, name",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Pre-existing implementation"
+    },
+    {
+      "id": "US-002",
+      "title": "Mock data for offline development",
+      "description": "As a developer, I need mock data so the frontend can render without a backend.",
+      "acceptanceCriteria": [
+        "src/lib/mocks.ts exports MOCK_RUNS: array of 3+ Run objects covering running, awaiting_approval, and done statuses",
+        "src/lib/mocks.ts exports MOCK_SSE_EVENTS: array of 5+ SSEEvent objects covering log, turn, test, and status types",
+        "Mock data imports types from src/lib/types.ts",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Electron preload and contextBridge",
+      "description": "As a developer, I need the preload script to expose IPC channels to the renderer via contextBridge.",
+      "acceptanceCriteria": [
+        "electron/preload.ts uses contextBridge.exposeInMainWorld to expose electronAPI with invoke and on methods",
+        "TypeScript declaration for window.electronAPI is available to the renderer",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "IPC typed wrapper functions",
+      "description": "As a developer, I need typed wrapper functions for all IPC channels so React components have a clean API.",
+      "acceptanceCriteria": [
+        "src/lib/ipc.ts exports typed functions: getRuns, getRun, approveRun, rejectRun, getConfig, saveConfig, getMe",
+        "Each function calls window.electronAPI.invoke with the correct channel name (runs:list, runs:get, runs:approve, runs:reject, config:get, config:save, auth:me)",
+        "Return types match the interfaces from types.ts",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Electron main process with mock IPC handlers",
+      "description": "As a developer, I need the Electron main process to create the window and register IPC handlers returning mock data.",
+      "acceptanceCriteria": [
+        "electron/main.ts creates a BrowserWindow loading the Vite dev server (dev) or built files (prod)",
+        "Registers IPC handlers for: runs:list, runs:get, runs:approve, runs:reject, config:get, config:save, auth:me, auth:login, auth:logout, daemon:status",
+        "All IPC handlers return mock data for MVP",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Daemon management stub",
+      "description": "As a developer, I need daemon spawn/kill stubs so the lifecycle is wired but does nothing in MVP.",
+      "acceptanceCriteria": [
+        "electron/daemon.ts exports spawnDaemon and killDaemon functions",
+        "spawnDaemon logs a message and returns without spawning a process",
+        "killDaemon is a no-op",
+        "Functions are called on app ready and app quit in main.ts",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "OAuth auth module stub",
+      "description": "As a developer, I need the auth module to register the deep link protocol and provide mock auth for MVP.",
+      "acceptanceCriteria": [
+        "electron/auth.ts registers auto-issue:// deep link protocol",
+        "auth:login IPC handler opens system browser to GitHub OAuth URL (or logs in MVP)",
+        "auth:me IPC handler returns a hardcoded mock user object for MVP",
+        "auth:logout IPC handler is a no-op for MVP",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "SSE hook for real-time logs",
+      "description": "As a developer, I need a React hook that connects to SSE and accumulates log events.",
+      "acceptanceCriteria": [
+        "src/lib/sse.ts exports useSSE(runId: string | null) returning { events: SSEEvent[], connected: boolean }",
+        "Opens EventSource to http://localhost:8080/api/runs/${runId}/logs when runId is not null",
+        "Accumulates events in state (append, never replace)",
+        "Sets connected: true after first onopen",
+        "Closes connection on unmount or when runId changes",
+        "Also exports useMockSSE that replays MOCK_SSE_EVENTS with timed delays",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Login page",
+      "description": "As a user, I want a clean login screen to authenticate with GitHub before accessing the dashboard.",
+      "acceptanceCriteria": [
+        "src/pages/Login.tsx renders centered vertically and horizontally on --bg background",
+        "Shows logo with pulsing dot animation and 'auto-issue' in Azeret Mono",
+        "Shows muted subtitle 'Sign in to access your dashboard'",
+        "'Sign in with GitHub' button with GitHub SVG icon, --accent background, dark text",
+        "Button calls window.electronAPI.invoke('auth:login')",
+        "After auth:success event, navigates to Dashboard using React Router",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "ProviderBadge component",
+      "description": "As a user, I want to see which AI provider is running a task.",
+      "acceptanceCriteria": [
+        "src/components/ProviderBadge.tsx accepts provider ('openai' | 'anthropic' | 'gemini') and optional model string",
+        "Renders bracket pattern: [ openai ] or [ openai · gpt-4o ] if model is provided",
+        "Uses --accent-flat background, rgba(0,230,118,0.15) border, --accent text",
+        "Font: Azeret Mono 11px, letter-spacing 0.08em, padding 2px 8px, border-radius 4px",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "RunCard component",
+      "description": "As a user, I want to see a summary card for each run showing issue, status, provider, and timing.",
+      "acceptanceCriteria": [
+        "src/components/RunCard.tsx accepts run: Run and onClick: () => void",
+        "Shows issue number #N, ProviderBadge, and status label [ STATUS ] with correct color per status",
+        "Left border 1px colored by status (queued→muted, running→amber, awaiting_approval→accent, pr_opened→blue, done→accent, failed→red)",
+        "Shows issue title truncated to one line",
+        "Footer shows turns count, elapsed time, retry count",
+        "If status is running, shows a live timer from started_at using setInterval",
+        "If test_result exists, shows test badge: checkmark tests (green), x tests (red), or dash tests (muted)",
+        "Running status shows CSS scanner line animation",
+        "Hover changes background from --bg to --bg2",
+        "All labels use Azeret Mono 10px, letter-spacing 0.12em, all-caps",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "UserMenu component",
+      "description": "As a logged-in user, I want to see my avatar and access a sign-out dropdown.",
+      "acceptanceCriteria": [
+        "src/components/UserMenu.tsx accepts user: User",
+        "Shows circular avatar 28px from user.avatar_url with --border ring",
+        "Click opens dropdown anchored to the right with username and Sign out option",
+        "Sign out calls window.electronAPI.invoke('auth:logout') and navigates to Login",
+        "Dropdown closes when clicking outside (document click listener)",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "KanbanBoard component",
+      "description": "As a user, I want runs organized in status columns to see agent state at a glance.",
+      "acceptanceCriteria": [
+        "src/components/KanbanBoard.tsx accepts runs: Run[] and onRunClick: (id: string) => void",
+        "Renders 5 columns: Queued, Running, Awaiting Approval, Done (includes pr_opened and done), Failed",
+        "Each column header shows name + run count (N)",
+        "Empty columns show 'No runs' in muted text",
+        "Horizontal scroll if columns overflow",
+        "Renders RunCard for each run in the appropriate column",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "AgentTerminal component",
+      "description": "As a user, I want a terminal-style live log of agent activity with auto-scroll and status bar.",
+      "acceptanceCriteria": [
+        "src/components/AgentTerminal.tsx accepts runId: string",
+        "Uses useSSE(runId) or useMockSSE for demo to get events",
+        "Renders titlebar with fake traffic lights and label [ AGENT LOG · ISSUE #N ] in Azeret Mono all-caps muted",
+        "Each event renders as a line with timestamp (HH:MM:SS), 4-char prefix (INFO/WARN/ERR/T·NN/OK/FAIL/DONE), and content with colors per design system",
+        "New lines animate in with opacity 0→1 + translateY 4px→0 in 200ms (CSS keyframes only)",
+        "Auto-scrolls to latest line; Pause scroll button appears when user scrolls up",
+        "Blinking cursor while connected is true and status is running",
+        "Status bar shows: status pill + current turn + model + live elapsed time",
+        "Font: Azeret Mono 13px, background --bg2, border --border-mid",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "ApprovePanel component",
+      "description": "As a user, I want to approve or reject an agent's work when it requires human review.",
+      "acceptanceCriteria": [
+        "src/components/ApprovePanel.tsx accepts run: Run, onApproved: () => void, onRejected: () => void",
+        "Only renders when run.status is awaiting_approval",
+        "Shows title 'Waiting for your approval' and subtitle about reviewing the PR",
+        "Shows clickable PR link 'View PR #N on GitHub' in blue from run.pr_url",
+        "Approve button: green-tinted flat background, calls approveRun(run.id) then onApproved()",
+        "Reject button: ghost with red border, calls rejectRun(run.id) then onRejected()",
+        "Both buttons show loading spinner and disable during API call",
+        "Background: rgba(167,139,250,0.06), border: rgba(167,139,250,0.2), border-radius 8px",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Dashboard page",
+      "description": "As a user, I want the main dashboard to show all runs in a Kanban board with polling updates.",
+      "acceptanceCriteria": [
+        "src/pages/Dashboard.tsx calls getMe() on mount and renders UserMenu in the nav",
+        "Nav shows [ AUTO-ISSUE ] branding in Azeret Mono",
+        "Polls getRuns() every 5 seconds via setInterval (mock data for MVP)",
+        "Renders KanbanBoard with the runs",
+        "Shows agent counter [ N / 12 AGENTS RUNNING ] above the board",
+        "Clicking a card navigates to /runs/${run.id} via React Router",
+        "Loading state: 3 skeleton cards with --bg3 background, opacity 0.5, no shimmer",
+        "Empty state: 'No active runs. Label a GitHub issue with' + inline [ auto-issue ] badge",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "RunDetail page",
+      "description": "As a user, I want to click into a run and see its full details, live terminal, and approval panel.",
+      "acceptanceCriteria": [
+        "src/pages/RunDetail.tsx receives id from React Router params",
+        "Shows back link to dashboard at top",
+        "Header shows issue number, title, status label, and ProviderBadge",
+        "Shows repo link, turn count, and relative start time",
+        "Fetches run via getRun(id) on mount",
+        "If run.status is awaiting_approval, renders ApprovePanel above the terminal",
+        "Renders AgentTerminal with run.id, occupying remaining viewport height",
+        "After approve/reject, re-fetches run and updates local state",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
