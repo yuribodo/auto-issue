@@ -1,0 +1,131 @@
+{
+  "project": "Auto-Issue Landing Page",
+  "branchName": "ralph/landing-page-mvp",
+  "description": "Next.js landing page with animated terminal demo, how-it-works section, and download CTAs",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Layout, fonts, and global CSS custom properties",
+      "description": "As a developer, I need the root layout with correct fonts and CSS variables so all components use the design system.",
+      "acceptanceCriteria": [
+        "landing/app/layout.tsx imports Google Fonts: Syne (700, 800), Azeret Mono (400, 500), DM Sans (300, 400, 500)",
+        "Global CSS defines all custom properties: --bg (#07070A), --bg2, --bg3, --border, --border-mid, --text, --text-muted, --text-dim, --accent (#00E676), --accent-flat, --amber, --red, --blue",
+        "html and body set to --bg background, --text color, font-family DM Sans",
+        "No Tailwind utility classes override the design system colors — use CSS variables",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Hero section with animated entry",
+      "description": "As a visitor, I want to immediately understand what Auto-Issue does through a bold headline and staggered entrance animation.",
+      "acceptanceCriteria": [
+        "Grid background with --border lines every 48px and radial mask fading at the bottom",
+        "Badge at top: pulsing dot + 'Open source · Growthway Hack 2026' text",
+        "Label above title: [ AUTONOMOUS CODING AGENT ] in Azeret Mono 11px, --text-muted, letter-spacing 0.14em",
+        "Title in Syne 800: 'GitHub Issues that' (line break) 'ship themselves' — 'ship themselves' in --accent, flat, no glow",
+        "Subtitle in DM Sans: 'Label an issue. An AI agent writes the code, runs the tests, and opens a PR.'",
+        "Staggered fade-up animation: badge (0ms) → title (100ms) → subtitle (200ms) → CTAs (300ms) → terminal (400ms)",
+        "All animations use CSS keyframes only — no Framer Motion, no GSAP",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Download CTA buttons",
+      "description": "As a visitor, I want clear download buttons so I can install Auto-Issue on my OS.",
+      "acceptanceCriteria": [
+        "Primary CTA: 'Download for macOS →' with --accent background and dark text",
+        "Secondary CTA: 'View on GitHub' ghost style with --border border and --text text",
+        "Below buttons: smaller text links for Windows and Linux downloads",
+        "All download links point to GitHub Releases URLs (placeholder hrefs for MVP)",
+        "Buttons are horizontally centered below the subtitle",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Terminal animation — 22-second loop",
+      "description": "As a visitor, I want to see a simulated terminal showing an AI agent resolving a GitHub issue.",
+      "acceptanceCriteria": [
+        "Terminal component with titlebar (traffic lights + label), log area, and status bar",
+        "Exact 10-line log sequence with specified delays from 0ms to 7800ms",
+        "Each line appears with fade-in + translateY animation (CSS keyframes)",
+        "Status bar starts as 'running' with purple pulsing dot, changes to 'done · PR #87 opened' (green) on last line",
+        "After 3 seconds on done state, terminal clears and restarts the loop",
+        "Total cycle approximately 22 seconds",
+        "Uses setTimeout chain with clearTimeout on cleanup — no memory leaks",
+        "Log colors: INFO→--text-muted, T·NN→--text (white), OK→--accent, DONE→--accent weight 500",
+        "Font: Azeret Mono 13px, background --bg2, border --border-mid",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "How it works — 3-step section",
+      "description": "As a visitor, I want to understand the product workflow in 3 simple steps.",
+      "acceptanceCriteria": [
+        "3-column grid separated by --border vertical lines, no elevated cards",
+        "Step 1 — [ 01 ] Label the issue: tag SVG icon, description with inline code snippets",
+        "Step 2 — [ 02 ] Agent takes over: spark SVG icon, description about isolated workspace",
+        "Step 3 — [ 03 ] Review the PR: checkmark SVG icon in --accent, description about auto-commit",
+        "Step numbers use bracket pattern [ 01 ] in Azeret Mono",
+        "Text uses DM Sans for descriptions",
+        "Responsive: stacks vertically on mobile",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Final CTA section",
+      "description": "As a visitor who has scrolled through the page, I want one more prompt to take action.",
+      "acceptanceCriteria": [
+        "Top border --border with subtle radial purple glow in background",
+        "Label: [ GET STARTED ] in Azeret Mono muted",
+        "Title in Syne 800: 'Ready to stop supervising agents?'",
+        "Subtitle: 'Connect your repository and watch the first PR open itself.'",
+        "Two buttons: 'Download for macOS →' (primary) + 'View on GitHub' (ghost)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Footer",
+      "description": "As a visitor, I want a minimal footer with project attribution.",
+      "acceptanceCriteria": [
+        "Top border --border, vertical padding 1.5rem",
+        "Left side: 'auto-issue · growthway hack 2026' in Azeret Mono muted",
+        "Right side: 'built with Go + Next.js' in Azeret Mono muted",
+        "Responsive: stacks on mobile",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

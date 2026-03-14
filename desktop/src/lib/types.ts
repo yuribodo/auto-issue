@@ -6,21 +6,17 @@ export type RunStatus =
   | 'done'
   | 'failed'
 
-export type TestResult = 'passed' | 'failed'
-
-export type Provider = 'openai' | 'anthropic' | 'gemini'
-
 export interface Run {
   id: string
   issue_number: number
   issue_title: string
   repo: string
   status: RunStatus
-  provider: Provider
+  provider: 'openai' | 'anthropic' | 'gemini'
   model: string
   started_at: string
   turns: number
-  test_result?: TestResult
+  test_result?: 'passed' | 'failed' | 'skipped'
   pr_url?: string
 }
 
