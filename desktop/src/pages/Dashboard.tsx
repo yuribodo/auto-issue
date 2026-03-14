@@ -4,6 +4,7 @@ import type { Run, User } from '../lib/types'
 import { getRuns, getMe } from '../lib/ipc'
 import KanbanBoard from '../components/KanbanBoard'
 import UserMenu from '../components/UserMenu'
+import NotificationBell from '../components/NotificationBell'
 
 export default function Dashboard() {
   const [runs, setRuns] = useState<Run[] | null>(null)
@@ -23,29 +24,52 @@ export default function Dashboard() {
   }, [])
 
   const runningCount = runs ? runs.filter((r) => r.status === 'running').length : 0
+  const todayRuns = runs ? runs.filter((r) => {
+    const d = new Date(r.started_at)
+    const now = new Date()
+    return d.toDateString() === now.toDateString()
+  }) : []
+  const todaySuccess = todayRuns.filter((r) => r.status === 'done').length
+  const todayTotal = todayRuns.length
+  const successRate = todayTotal > 0 ? Math.round((todaySuccess / todayTotal) * 100) : 0
 
   const handleRunClick = (id: string) => {
-    navigate(`/runs/${id}`)
+    navigate(`/run/${id}`)
   }
 
   return (
     <div style={styles.page}>
       <nav style={styles.nav}>
-        <div style={styles.branding}>
-          <span style={styles.bracket}>[</span>
-          <span style={styles.brandText}>AUTO-ISSUE</span>
-          <span style={styles.bracket}>]</span>
+        <div style={styles.navLeft}>
+          {user && <UserMenu user={user} />}
         </div>
-        {user && <UserMenu user={user} />}
+        <div style={styles.navRight}>
+          <NotificationBell />
+        </div>
       </nav>
 
       <main style={styles.main}>
-        <div style={styles.agentCounter}>
-          <span style={styles.bracket}>[</span>
-          <span style={styles.counterText}>
-            {runningCount} / 12 AGENTS RUNNING
-          </span>
-          <span style={styles.bracket}>]</span>
+        {/* Mini Metrics + New Run */}
+        <div style={styles.topBar}>
+          <div style={styles.metrics}>
+            <div style={styles.metric}>
+              <span style={styles.bracket}>[</span>
+              <span style={styles.metricValue}>
+                {runningCount} / 12 AGENTS RUNNING
+              </span>
+              <span style={styles.bracket}>]</span>
+            </div>
+            <div style={styles.metric}>
+              <span style={styles.bracket}>[</span>
+              <span style={styles.metricValue}>
+                {successRate}% SUCCESS TODAY
+              </span>
+              <span style={styles.bracket}>]</span>
+            </div>
+          </div>
+          <button style={styles.newRunBtn} onClick={() => navigate('/create-run')}>
+            + New Run
+          </button>
         </div>
 
         {runs === null ? (
@@ -71,17 +95,45 @@ const styles: Record<string, React.CSSProperties> = {
   page: {
     display: 'flex',
     flexDirection: 'column',
-    minHeight: '100vh',
+    height: '100vh',
     background: 'var(--bg)',
   },
   nav: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '16px 24px',
+    padding: '12px 24px',
     borderBottom: '1px solid var(--border)',
   },
-  branding: {
+  navLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  navRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  main: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '20px 24px',
+    gap: '16px',
+    minHeight: 0,
+  },
+  topBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  metrics: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+  },
+  metric: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
@@ -92,31 +144,27 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--fg-muted)',
     fontWeight: 400,
   },
-  brandText: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '13px',
-    fontWeight: 600,
-    color: 'var(--fg)',
-    letterSpacing: '0.12em',
-  },
-  main: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '24px',
-    gap: '16px',
-  },
-  agentCounter: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  counterText: {
+  metricValue: {
     fontFamily: 'var(--font-mono)',
     fontSize: '11px',
     fontWeight: 500,
     color: 'var(--accent)',
     letterSpacing: '0.12em',
+  },
+  newRunBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 16px',
+    background: 'var(--accent)',
+    color: '#0a0a0a',
+    border: 'none',
+    borderRadius: '4px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    letterSpacing: '0.04em',
   },
   skeletonBoard: {
     display: 'flex',
