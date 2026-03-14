@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { SSEEvent, Run } from '../lib/types'
-import { useMockSSE } from '../lib/sse'
+import { useRunEvents } from '../lib/sse'
 
 interface AgentTerminalProps {
   runId: string
@@ -44,7 +44,7 @@ function formatElapsed(startedAt: string): string {
 }
 
 export default function AgentTerminal({ runId, run }: AgentTerminalProps) {
-  const { events, connected } = useMockSSE()
+  const { events, connected } = useRunEvents(runId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const [elapsed, setElapsed] = useState('')

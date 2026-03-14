@@ -1,3 +1,6 @@
+// Shared types used by both electron main process and renderer.
+// Keep in sync with src/lib/types.ts
+
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -33,59 +36,6 @@ export interface SSEEvent {
   timestamp: string
   prefix: string
   content: string
-}
-
-export interface User {
-  login: string
-  avatar_url: string
-  name: string
-}
-
-export interface Repository {
-  id: string
-  full_name: string
-  description: string
-  language: string
-  open_issues_count: number
-  is_monitored: boolean
-}
-
-export interface Issue {
-  number: number
-  title: string
-  labels: string[]
-  created_at: string
-}
-
-export interface Notification {
-  id: string
-  type: 'approval_needed' | 'run_failed' | 'pr_opened'
-  run_id: string
-  repo: string
-  issue_number: number
-  message: string
-  timestamp: string
-  read: boolean
-}
-
-export interface DailyStats {
-  date: string
-  total: number
-  success: number
-  failed: number
-}
-
-export interface ProviderStats {
-  provider: Provider
-  runs: number
-  cost_usd: number
-  avg_time_min: number
-}
-
-export interface RepoStats {
-  repo: string
-  runs: number
-  success_rate: number
 }
 
 export interface SettingsData {

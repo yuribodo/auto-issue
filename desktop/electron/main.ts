@@ -1,82 +1,31 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
-import { spawnDaemon, killDaemon } from './daemon'
 import {
   registerDeepLinkProtocol,
   handleLogin,
   handleGetMe,
   handleLogout,
 } from './auth'
-
-const MOCK_RUNS = [
-  {
-    id: 'run-001',
-    issue_number: 42,
-    issue_title: 'Add dark mode toggle to settings page',
-    repo: 'acme/webapp',
-    status: 'running',
-    provider: 'anthropic',
-    model: 'claude-sonnet-4-6',
-    started_at: new Date(Date.now() - 4 * 60_000).toISOString(),
-    turns: 7,
-  },
-  {
-    id: 'run-002',
-    issue_number: 87,
-    issue_title: 'Fix pagination offset bug in /api/users',
-    repo: 'acme/webapp',
-    status: 'awaiting_approval',
-    provider: 'openai',
-    model: 'gpt-4o',
-    started_at: new Date(Date.now() - 12 * 60_000).toISOString(),
-    turns: 14,
-    test_result: 'passed',
-    pr_url: 'https://github.com/acme/webapp/pull/88',
-  },
-  {
-    id: 'run-003',
-    issue_number: 53,
-    issue_title: 'Refactor auth middleware to use JWT',
-    repo: 'acme/api-server',
-    status: 'done',
-    provider: 'gemini',
-    model: 'gemini-2.5-pro',
-    started_at: new Date(Date.now() - 30 * 60_000).toISOString(),
-    turns: 22,
-    test_result: 'passed',
-    pr_url: 'https://github.com/acme/api-server/pull/54',
-  },
-  {
-    id: 'run-004',
-    issue_number: 15,
-    issue_title: 'Update README with new API endpoints',
-    repo: 'acme/docs',
-    status: 'queued',
-    provider: 'anthropic',
-    model: 'claude-sonnet-4-6',
-    started_at: new Date().toISOString(),
-    turns: 0,
-  },
-  {
-    id: 'run-005',
-    issue_number: 99,
-    issue_title: 'Migrate database schema to v3',
-    repo: 'acme/webapp',
-    status: 'failed',
-    provider: 'openai',
-    model: 'gpt-4o',
-    started_at: new Date(Date.now() - 20 * 60_000).toISOString(),
-    turns: 8,
-    test_result: 'failed',
-  },
-]
-
-const MOCK_CONFIG = {
-  apiUrl: 'http://localhost:8080',
-  autoApprove: false,
-}
+import { loadConfig, persistConfig, loadRuns, persistRuns } from './store'
+import {
+  createRun,
+  startRun,
+  startTestRun,
+  cancelRun,
+  getAllRuns,
+  getRun,
+  getRunEvents,
+  recoverRuns,
+  killAll,
+  setBroadcast,
+} from './runner'
+import type { SSEEvent, SettingsData, CreateRunParams, Provider } from './shared-types'
 
 let mainWindow: BrowserWindow | null = null
+
+function broadcastEvent(runId: string, event: SSEEvent) {
+  mainWindow?.webContents.send('run:event', { runId, event })
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -101,32 +50,66 @@ function createWindow() {
 }
 
 function registerIpcHandlers() {
+  // --- Runs ---
   ipcMain.handle('runs:list', () => {
-    return MOCK_RUNS
+    return getAllRuns()
   })
 
   ipcMain.handle('runs:get', (_event, id: string) => {
-    return MOCK_RUNS.find((r) => r.id === id) ?? null
+    return getRun(id)
+  })
+
+  ipcMain.handle('runs:create', async (_event, params: CreateRunParams) => {
+    const run = createRun(params)
+    // Start asynchronously — don't block the IPC response
+    startRun(run.id).catch((err) => {
+      console.error(`[runner] startRun error for ${run.id}:`, err)
+    })
+    return run
+  })
+
+  ipcMain.handle('runs:test', async (_event, provider: Provider) => {
+    return startTestRun(provider)
+  })
+
+  ipcMain.handle('runs:cancel', (_event, id: string) => {
+    cancelRun(id)
   })
 
   ipcMain.handle('runs:approve', (_event, id: string) => {
-    const run = MOCK_RUNS.find((r) => r.id === id)
-    if (run) run.status = 'done'
+    const runs = loadRuns()
+    const run = runs.find((r) => r.id === id)
+    if (run) {
+      run.status = 'done'
+      run.finished_at = new Date().toISOString()
+      persistRuns(runs)
+    }
   })
 
   ipcMain.handle('runs:reject', (_event, id: string) => {
-    const run = MOCK_RUNS.find((r) => r.id === id)
-    if (run) run.status = 'failed'
+    const runs = loadRuns()
+    const run = runs.find((r) => r.id === id)
+    if (run) {
+      run.status = 'failed'
+      run.finished_at = new Date().toISOString()
+      persistRuns(runs)
+    }
   })
 
+  ipcMain.handle('run:events:get', (_event, runId: string) => {
+    return getRunEvents(runId)
+  })
+
+  // --- Config ---
   ipcMain.handle('config:get', () => {
-    return MOCK_CONFIG
+    return loadConfig()
   })
 
-  ipcMain.handle('config:save', (_event, config: typeof MOCK_CONFIG) => {
-    Object.assign(MOCK_CONFIG, config)
+  ipcMain.handle('config:save', (_event, config: SettingsData) => {
+    persistConfig(config)
   })
 
+  // --- Auth ---
   ipcMain.handle('auth:me', () => {
     return handleGetMe()
   })
@@ -138,18 +121,15 @@ function registerIpcHandlers() {
   ipcMain.handle('auth:logout', () => {
     handleLogout()
   })
-
-  ipcMain.handle('daemon:status', () => {
-    return { running: false }
-  })
 }
 
 registerDeepLinkProtocol()
 
 app.whenReady().then(() => {
+  setBroadcast(broadcastEvent)
+  recoverRuns()
   registerIpcHandlers()
   createWindow()
-  spawnDaemon()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -165,5 +145,5 @@ app.on('window-all-closed', () => {
 })
 
 app.on('quit', () => {
-  killDaemon()
+  killAll()
 })

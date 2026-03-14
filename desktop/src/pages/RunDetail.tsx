@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { Run } from '../lib/types'
-import { getRun } from '../lib/ipc'
+import { getRun, cancelRun } from '../lib/ipc'
 import ProviderBadge from '../components/ProviderBadge'
 import ApprovePanel from '../components/ApprovePanel'
 import AgentTerminal from '../components/AgentTerminal'
@@ -35,11 +35,22 @@ export default function RunDetail() {
   useEffect(() => {
     if (!id) return
     getRun(id).then(setRun)
+    // Poll for status updates while running
+    const interval = setInterval(() => {
+      getRun(id).then(setRun)
+    }, 3000)
+    return () => clearInterval(interval)
   }, [id])
 
   const refetchRun = () => {
     if (!id) return
     getRun(id).then(setRun)
+  }
+
+  const handleCancel = async () => {
+    if (!id) return
+    await cancelRun(id)
+    refetchRun()
   }
 
   if (!run) {
@@ -76,6 +87,11 @@ export default function RunDetail() {
             {run.status.toUpperCase().replace('_', ' ')}
           </span>
           <ProviderBadge provider={run.provider} model={run.model} />
+          {run.status === 'running' && (
+            <button style={styles.cancelBtn} onClick={handleCancel}>
+              Cancel Run
+            </button>
+          )}
         </div>
         <div style={styles.issueTitle}>{run.issue_title}</div>
         <div style={styles.meta}>
@@ -84,8 +100,47 @@ export default function RunDetail() {
           <span style={styles.metaItem}>{run.turns} turns</span>
           <span style={styles.metaSep}>·</span>
           <span style={styles.metaItem}>started {formatRelativeTime(run.started_at)}</span>
+          {run.cost_usd !== undefined && (
+            <>
+              <span style={styles.metaSep}>·</span>
+              <span style={styles.metaItem}>${run.cost_usd.toFixed(2)}</span>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Changes Summary */}
+      {(run.files_changed !== undefined || run.pr_url) && (
+        <div style={styles.changesBar}>
+          {run.files_changed !== undefined && (
+            <div style={styles.changesSummary}>
+              <span style={styles.changesItem}>
+                {run.files_changed} files changed
+              </span>
+              {run.lines_added !== undefined && (
+                <span style={{ ...styles.changesItem, color: 'var(--accent)' }}>
+                  +{run.lines_added}
+                </span>
+              )}
+              {run.lines_removed !== undefined && (
+                <span style={{ ...styles.changesItem, color: 'var(--red)' }}>
+                  -{run.lines_removed}
+                </span>
+              )}
+            </div>
+          )}
+          {run.pr_url && (
+            <a
+              href={run.pr_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={styles.viewPrBtn}
+            >
+              View PR on GitHub →
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Approve Panel */}
       {run.status === 'awaiting_approval' && (
@@ -170,6 +225,49 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     fontSize: '11px',
     color: 'var(--fg-muted)',
+  },
+  changesBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 14px',
+    background: 'var(--bg2)',
+    border: '1px solid var(--border-mid)',
+    borderRadius: '6px',
+  },
+  changesSummary: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  changesItem: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    color: 'var(--fg)',
+    letterSpacing: '0.04em',
+  },
+  viewPrBtn: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    color: 'var(--blue)',
+    textDecoration: 'none',
+    letterSpacing: '0.04em',
+    padding: '4px 12px',
+    border: '1px solid rgba(66,165,245,0.3)',
+    borderRadius: '4px',
+    transition: 'all 150ms ease',
+  },
+  cancelBtn: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '10px',
+    letterSpacing: '0.08em',
+    color: 'var(--red)',
+    background: 'transparent',
+    border: '1px solid var(--red)',
+    borderRadius: '4px',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    marginLeft: 'auto',
   },
   terminalWrapper: {
     flex: 1,

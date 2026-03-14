@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { SSEEvent } from './types'
+import { getRunEvents } from './ipc'
 import { MOCK_SSE_EVENTS } from './mocks'
 
 export function useSSE(runId: string | null): {
@@ -71,6 +72,53 @@ export function useMockSSE(): { events: SSEEvent[]; connected: boolean } {
       setConnected(false)
     }
   }, [replay])
+
+  return { events, connected }
+}
+
+/**
+ * Real-time event streaming for a run via IPC.
+ * Loads buffered events on mount and subscribes to live events.
+ */
+export function useRunEvents(runId: string | null): {
+  events: SSEEvent[]
+  connected: boolean
+} {
+  const [events, setEvents] = useState<SSEEvent[]>([])
+  const [connected, setConnected] = useState(false)
+
+  useEffect(() => {
+    if (!runId) {
+      setEvents([])
+      setConnected(false)
+      return
+    }
+
+    // Load buffered events
+    getRunEvents(runId).then((buffered) => {
+      setEvents(buffered)
+      setConnected(true)
+    })
+
+    // Subscribe to live events
+    const unsubscribe = window.electronAPI.on(
+      'run:event',
+      (data: unknown) => {
+        const { runId: eventRunId, event } = data as {
+          runId: string
+          event: SSEEvent
+        }
+        if (eventRunId === runId) {
+          setEvents((prev) => [...prev, event])
+        }
+      }
+    )
+
+    return () => {
+      unsubscribe()
+      setConnected(false)
+    }
+  }, [runId])
 
   return { events, connected }
 }

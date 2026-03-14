@@ -1,4 +1,4 @@
-import type { Run, SSEEvent } from './types'
+import type { Run, SSEEvent, Repository, Issue, Notification, DailyStats, ProviderStats, RepoStats, SettingsData } from './types'
 
 export const MOCK_RUNS: Run[] = [
   {
@@ -11,6 +11,10 @@ export const MOCK_RUNS: Run[] = [
     model: 'claude-sonnet-4-6',
     started_at: new Date(Date.now() - 4 * 60_000).toISOString(),
     turns: 7,
+    files_changed: 3,
+    lines_added: 85,
+    lines_removed: 12,
+    cost_usd: 0.04,
   },
   {
     id: 'run-002',
@@ -21,9 +25,14 @@ export const MOCK_RUNS: Run[] = [
     provider: 'openai',
     model: 'gpt-4o',
     started_at: new Date(Date.now() - 12 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 2 * 60_000).toISOString(),
     turns: 14,
     test_result: 'passed',
     pr_url: 'https://github.com/acme/webapp/pull/88',
+    files_changed: 2,
+    lines_added: 34,
+    lines_removed: 8,
+    cost_usd: 0.12,
   },
   {
     id: 'run-003',
@@ -34,9 +43,14 @@ export const MOCK_RUNS: Run[] = [
     provider: 'gemini',
     model: 'gemini-2.5-pro',
     started_at: new Date(Date.now() - 30 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 15 * 60_000).toISOString(),
     turns: 22,
     test_result: 'passed',
     pr_url: 'https://github.com/acme/api-server/pull/54',
+    files_changed: 5,
+    lines_added: 180,
+    lines_removed: 95,
+    cost_usd: 0.28,
   },
   {
     id: 'run-004',
@@ -58,8 +72,102 @@ export const MOCK_RUNS: Run[] = [
     provider: 'openai',
     model: 'gpt-4o',
     started_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+    finished_at: new Date(Date.now() - 18 * 60_000).toISOString(),
     turns: 8,
     test_result: 'failed',
+    files_changed: 4,
+    lines_added: 67,
+    lines_removed: 23,
+    cost_usd: 0.09,
+  },
+  {
+    id: 'run-006',
+    issue_number: 31,
+    issue_title: 'Add rate limiting to public API endpoints',
+    repo: 'acme/api-server',
+    status: 'done',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    started_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    finished_at: new Date(Date.now() - 1.8 * 3600_000).toISOString(),
+    turns: 18,
+    test_result: 'passed',
+    pr_url: 'https://github.com/acme/api-server/pull/32',
+    files_changed: 6,
+    lines_added: 245,
+    lines_removed: 30,
+    cost_usd: 0.18,
+  },
+  {
+    id: 'run-007',
+    issue_number: 12,
+    issue_title: 'Fix broken image upload on mobile Safari',
+    repo: 'acme/webapp',
+    status: 'done',
+    provider: 'openai',
+    model: 'gpt-4o',
+    started_at: new Date(Date.now() - 5 * 3600_000).toISOString(),
+    finished_at: new Date(Date.now() - 4.5 * 3600_000).toISOString(),
+    turns: 11,
+    test_result: 'passed',
+    pr_url: 'https://github.com/acme/webapp/pull/13',
+    files_changed: 2,
+    lines_added: 45,
+    lines_removed: 18,
+    cost_usd: 0.08,
+  },
+  {
+    id: 'run-008',
+    issue_number: 8,
+    issue_title: 'Implement webhook retry logic with backoff',
+    repo: 'acme/api-server',
+    status: 'done',
+    provider: 'gemini',
+    model: 'gemini-2.5-pro',
+    started_at: new Date(Date.now() - 24 * 3600_000).toISOString(),
+    finished_at: new Date(Date.now() - 23.5 * 3600_000).toISOString(),
+    turns: 25,
+    test_result: 'passed',
+    pr_url: 'https://github.com/acme/api-server/pull/9',
+    files_changed: 4,
+    lines_added: 312,
+    lines_removed: 45,
+    cost_usd: 0.35,
+  },
+  {
+    id: 'run-009',
+    issue_number: 5,
+    issue_title: 'Add search functionality to docs site',
+    repo: 'acme/docs',
+    status: 'failed',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    started_at: new Date(Date.now() - 48 * 3600_000).toISOString(),
+    finished_at: new Date(Date.now() - 47.8 * 3600_000).toISOString(),
+    turns: 6,
+    test_result: 'failed',
+    files_changed: 1,
+    lines_added: 15,
+    lines_removed: 0,
+    cost_usd: 0.03,
+  },
+  {
+    id: 'run-010',
+    issue_number: 71,
+    issue_title: 'Optimize database queries for user dashboard',
+    repo: 'acme/webapp',
+    status: 'done',
+    provider: 'openai',
+    model: 'gpt-4o',
+    started_at: new Date(Date.now() - 72 * 3600_000).toISOString(),
+    finished_at: new Date(Date.now() - 71 * 3600_000).toISOString(),
+    turns: 16,
+    test_result: 'passed',
+    pr_url: 'https://github.com/acme/webapp/pull/72',
+    files_changed: 3,
+    lines_added: 89,
+    lines_removed: 134,
+    cost_usd: 0.14,
   },
 ]
 
@@ -107,3 +215,162 @@ export const MOCK_SSE_EVENTS: SSEEvent[] = [
     content: 'Deprecated API usage detected in Settings.tsx:42',
   },
 ]
+
+export const MOCK_REPOSITORIES: Repository[] = [
+  {
+    id: 'repo-1',
+    full_name: 'acme/webapp',
+    description: 'Main web application - React + Node.js',
+    language: 'TypeScript',
+    open_issues_count: 23,
+    is_monitored: true,
+  },
+  {
+    id: 'repo-2',
+    full_name: 'acme/api-server',
+    description: 'REST API backend service',
+    language: 'Go',
+    open_issues_count: 12,
+    is_monitored: true,
+  },
+  {
+    id: 'repo-3',
+    full_name: 'acme/docs',
+    description: 'Documentation site built with Docusaurus',
+    language: 'MDX',
+    open_issues_count: 7,
+    is_monitored: true,
+  },
+  {
+    id: 'repo-4',
+    full_name: 'acme/mobile-app',
+    description: 'iOS and Android app - React Native',
+    language: 'TypeScript',
+    open_issues_count: 31,
+    is_monitored: false,
+  },
+  {
+    id: 'repo-5',
+    full_name: 'acme/infra',
+    description: 'Infrastructure as code - Terraform + Pulumi',
+    language: 'HCL',
+    open_issues_count: 5,
+    is_monitored: false,
+  },
+]
+
+export const MOCK_ISSUES: Record<string, Issue[]> = {
+  'acme/webapp': [
+    { number: 101, title: 'Add user profile picture upload', labels: ['enhancement', 'auto-issue'], created_at: new Date(Date.now() - 2 * 86400_000).toISOString() },
+    { number: 98, title: 'Fix CSS overflow on mobile navbar', labels: ['bug', 'auto-issue'], created_at: new Date(Date.now() - 3 * 86400_000).toISOString() },
+    { number: 95, title: 'Implement email verification flow', labels: ['enhancement'], created_at: new Date(Date.now() - 5 * 86400_000).toISOString() },
+    { number: 92, title: 'Add loading skeleton to dashboard cards', labels: ['enhancement', 'auto-issue'], created_at: new Date(Date.now() - 7 * 86400_000).toISOString() },
+    { number: 89, title: 'Fix timezone handling in event scheduler', labels: ['bug'], created_at: new Date(Date.now() - 10 * 86400_000).toISOString() },
+  ],
+  'acme/api-server': [
+    { number: 45, title: 'Add GraphQL subscription support', labels: ['enhancement'], created_at: new Date(Date.now() - 1 * 86400_000).toISOString() },
+    { number: 43, title: 'Fix race condition in queue consumer', labels: ['bug', 'critical', 'auto-issue'], created_at: new Date(Date.now() - 4 * 86400_000).toISOString() },
+    { number: 40, title: 'Implement API key rotation endpoint', labels: ['enhancement', 'auto-issue'], created_at: new Date(Date.now() - 6 * 86400_000).toISOString() },
+  ],
+  'acme/docs': [
+    { number: 18, title: 'Add API rate limiting documentation', labels: ['docs', 'auto-issue'], created_at: new Date(Date.now() - 2 * 86400_000).toISOString() },
+    { number: 16, title: 'Fix broken links in quickstart guide', labels: ['bug'], created_at: new Date(Date.now() - 8 * 86400_000).toISOString() },
+  ],
+}
+
+export const MOCK_NOTIFICATIONS: Notification[] = [
+  {
+    id: 'notif-1',
+    type: 'approval_needed',
+    run_id: 'run-002',
+    repo: 'acme/webapp',
+    issue_number: 87,
+    message: 'Run #87 needs your approval — tests passed, PR ready',
+    timestamp: new Date(Date.now() - 2 * 60_000).toISOString(),
+    read: false,
+  },
+  {
+    id: 'notif-2',
+    type: 'run_failed',
+    run_id: 'run-005',
+    repo: 'acme/webapp',
+    issue_number: 99,
+    message: 'Run #99 failed — database migration tests failed',
+    timestamp: new Date(Date.now() - 18 * 60_000).toISOString(),
+    read: false,
+  },
+  {
+    id: 'notif-3',
+    type: 'pr_opened',
+    run_id: 'run-003',
+    repo: 'acme/api-server',
+    issue_number: 53,
+    message: 'PR #54 opened for issue #53 — auth middleware refactor',
+    timestamp: new Date(Date.now() - 15 * 60_000).toISOString(),
+    read: true,
+  },
+  {
+    id: 'notif-4',
+    type: 'pr_opened',
+    run_id: 'run-006',
+    repo: 'acme/api-server',
+    issue_number: 31,
+    message: 'PR #32 opened for issue #31 — rate limiting added',
+    timestamp: new Date(Date.now() - 1.8 * 3600_000).toISOString(),
+    read: true,
+  },
+]
+
+function generateDailyStats(days: number): DailyStats[] {
+  const stats: DailyStats[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(Date.now() - i * 86400_000)
+    const total = Math.floor(Math.random() * 8) + 2
+    const failed = Math.floor(Math.random() * Math.min(3, total))
+    stats.push({
+      date: date.toISOString().split('T')[0],
+      total,
+      success: total - failed,
+      failed,
+    })
+  }
+  return stats
+}
+
+export const MOCK_DAILY_STATS_7D = generateDailyStats(7)
+export const MOCK_DAILY_STATS_30D = generateDailyStats(30)
+
+export const MOCK_PROVIDER_STATS: ProviderStats[] = [
+  { provider: 'anthropic', runs: 34, cost_usd: 4.82, avg_time_min: 8.5 },
+  { provider: 'openai', runs: 28, cost_usd: 6.14, avg_time_min: 11.2 },
+  { provider: 'gemini', runs: 15, cost_usd: 2.90, avg_time_min: 12.8 },
+]
+
+export const MOCK_REPO_STATS: RepoStats[] = [
+  { repo: 'acme/webapp', runs: 42, success_rate: 0.81 },
+  { repo: 'acme/api-server', runs: 24, success_rate: 0.88 },
+  { repo: 'acme/docs', runs: 11, success_rate: 0.73 },
+]
+
+export const MOCK_SETTINGS: SettingsData = {
+  default_provider: 'anthropic',
+  default_model: 'claude-sonnet-4-6',
+  api_keys: {
+    openai: 'sk-••••••••••••••••••••',
+    anthropic: 'sk-ant-••••••••••••••••',
+    gemini: 'AI••••••••••••••••••••••',
+  },
+  notifications: {
+    approval_needed: true,
+    run_failed: true,
+    pr_opened: false,
+  },
+  polling_interval: 5,
+  github_token: '',
+}
+
+export const MOCK_MODELS: Record<string, string[]> = {
+  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+  anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+}

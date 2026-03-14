@@ -5,8 +5,9 @@ export default function Login() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const unsub = window.electronAPI.on('auth:success', () => {
-      navigate('/dashboard')
+    const unsub = window.electronAPI.on('auth:success', (...args: unknown[]) => {
+      const isNewUser = args[0] as boolean | undefined
+      navigate(isNewUser ? '/onboarding' : '/dashboard')
     })
     return unsub
   }, [navigate])
