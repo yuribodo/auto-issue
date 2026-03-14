@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
+import { spawnDaemon, killDaemon } from './daemon'
 
 const MOCK_RUNS = [
   {
@@ -147,6 +148,7 @@ function registerIpcHandlers() {
 app.whenReady().then(() => {
   registerIpcHandlers()
   createWindow()
+  spawnDaemon()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -159,4 +161,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('quit', () => {
+  killDaemon()
 })
