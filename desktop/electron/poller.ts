@@ -114,6 +114,8 @@ async function importIssue(
 ): Promise<void> {
   console.log(`[Poller] Importing issue #${githubIssue.number} from ${repo}`)
 
+  const [owner] = repo.split('/')
+
   try {
     const backendIssue = await backendCreateRun({
       repo,
@@ -122,7 +124,7 @@ async function importIssue(
       issue_body: githubIssue.body || '',
       provider: 'anthropic',
       model: 'claude-sonnet-4-6',
-    })
+    }, owner)
 
     tracked.push({
       repo,
