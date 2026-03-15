@@ -6,6 +6,7 @@ import "time"
 type Issue struct {
 	IssueID       string     `json:"id" gorm:"primaryKey;column:issue_id"`
 	RunNumber     int        `json:"run_number" gorm:"not null;default:0"`
+	GithubUser    string     `json:"github_user" gorm:"not null;default:'';index"`
 	Title         string     `json:"title" gorm:"not null"`
 	Description   string     `json:"description" gorm:"not null;default:''"`
 	Phase         string     `json:"phase" gorm:"not null;default:'backlog';index"`
