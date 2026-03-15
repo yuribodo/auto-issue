@@ -11,7 +11,7 @@ const ALLOWED_INVOKE = [
   'poller:sync',
 ]
 
-const ALLOWED_ON = ['run:event', 'auth:success']
+const ALLOWED_ON = ['run:event', 'auth:success', 'auth:device-code', 'auth:error']
 
 contextBridge.exposeInMainWorld('electronAPI', {
   invoke: (channel: string, ...args: unknown[]) => {
