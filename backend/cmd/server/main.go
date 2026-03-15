@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"auto-issue/internal/agent"
 	"auto-issue/internal/api"
 	"auto-issue/internal/config"
 	"auto-issue/internal/db"
@@ -64,10 +63,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize agent runner, broadcaster, and orchestrator
-	ag := agent.NewRunner(cfg.Agent, ghToken)
+	// Initialize broadcaster and orchestrator
 	broadcaster := api.NewBroadcaster()
-	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, broadcaster, ghToken, cfg.MaxConcurrency)
+	orch := service.NewOrchestrator(wsMgr, issueRepo, cfg.Agent, cfg.Agent.APIKeys, broadcaster, ghToken, cfg.MaxConcurrency)
 	orch.Start()
 
 	// Set up HTTP server

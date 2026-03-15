@@ -42,7 +42,7 @@ func (r *PGConfigRepository) Load(ctx context.Context) (*config.Config, error) {
 		return nil, fmt.Errorf("invalid agent_timeout %q: %w", row.AgentTimeout, err)
 	}
 
-	return &config.Config{
+	cfg := &config.Config{
 		APIPort:        row.APIPort,
 		MaxConcurrency: row.MaxConcurrency,
 		Agent: config.AgentConfig{
@@ -51,11 +51,21 @@ func (r *PGConfigRepository) Load(ctx context.Context) (*config.Config, error) {
 			Timeout:       config.Duration{Duration: timeout},
 			MaxIterations: row.AgentMaxIter,
 			Prompt:        row.AgentPrompt,
+			APIKeys:       make(map[string]string),
 		},
 		Workspace: config.WorkspaceConfig{
 			BasePath: row.WorkspaceBase,
 		},
-	}, nil
+	}
+
+	if row.OpenAIAPIKey != "" {
+		cfg.Agent.APIKeys["openai"] = row.OpenAIAPIKey
+	}
+	if row.GeminiAPIKey != "" {
+		cfg.Agent.APIKeys["gemini"] = row.GeminiAPIKey
+	}
+
+	return cfg, nil
 }
 
 // Save writes the config to the singleton row in PostgreSQL.
@@ -70,6 +80,11 @@ func (r *PGConfigRepository) Save(ctx context.Context, cfg *config.Config) error
 		AgentMaxIter:   cfg.Agent.MaxIterations,
 		AgentPrompt:    cfg.Agent.Prompt,
 		WorkspaceBase:  cfg.Workspace.BasePath,
+	}
+
+	if cfg.Agent.APIKeys != nil {
+		row.OpenAIAPIKey = cfg.Agent.APIKeys["openai"]
+		row.GeminiAPIKey = cfg.Agent.APIKeys["gemini"]
 	}
 
 	return r.db.WithContext(ctx).Save(&row).Error

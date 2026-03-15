@@ -5,6 +5,7 @@ import "time"
 // Issue is the GORM model for the issues table.
 type Issue struct {
 	IssueID       string     `json:"id" gorm:"primaryKey;column:issue_id"`
+	RunNumber     int        `json:"run_number" gorm:"not null;default:0"`
 	Title         string     `json:"title" gorm:"not null"`
 	Description   string     `json:"description" gorm:"not null;default:''"`
 	Phase         string     `json:"phase" gorm:"not null;default:'backlog';index"`
@@ -13,6 +14,8 @@ type Issue struct {
 	RepoPath      string     `json:"repo_path" gorm:"not null;default:''"`
 	GithubRepo    string     `json:"github_repo,omitempty" gorm:"not null;default:''"`
 	IssueNumber   int        `json:"issue_number,omitempty" gorm:"not null;default:0"`
+	AgentType     string     `json:"agent_type,omitempty" gorm:"not null;default:''"`
+	AgentModel    string     `json:"agent_model,omitempty" gorm:"not null;default:''"`
 	StartedAt     *time.Time `json:"started_at"`
 	LastFeedback  string     `json:"last_feedback,omitempty" gorm:"not null;default:''"`
 	FeedbackCount int        `json:"feedback_count" gorm:"not null;default:0"`

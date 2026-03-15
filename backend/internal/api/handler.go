@@ -100,6 +100,8 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		RepoPath    string `json:"repo_path"`
 		GithubRepo  string `json:"github_repo"`
 		IssueNumber int    `json:"issue_number"`
+		AgentType   string `json:"agent_type"`
+		AgentModel  string `json:"agent_model"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -109,6 +111,15 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "title is required")
 		return
+	}
+
+	// Validate agent_type if provided
+	if req.AgentType != "" {
+		validTypes := map[string]bool{"claude-code": true, "codex": true, "gemini": true}
+		if !validTypes[req.AgentType] {
+			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid agent_type: %s (valid: claude-code, codex, gemini)", req.AgentType))
+			return
+		}
 	}
 
 	id := fmt.Sprintf("issue-%d", time.Now().UnixMilli())
@@ -125,6 +136,16 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set agent type/model if specified
+	if req.AgentType != "" || req.AgentModel != "" {
+		if err := h.issues.UpdateAgentInfo(r.Context(), issue.IssueID, req.AgentType, req.AgentModel); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		issue.AgentType = req.AgentType
+		issue.AgentModel = req.AgentModel
+	}
+
 	writeJSON(w, http.StatusCreated, issue)
 }
 
@@ -139,7 +160,14 @@ func (h *Handler) handleIssueByPath(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 {
-		h.getIssue(w, r, issueID)
+		switch r.Method {
+		case http.MethodGet:
+			h.getIssue(w, r, issueID)
+		case http.MethodDelete:
+			h.deleteIssue(w, r, issueID)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET and DELETE are allowed")
+		}
 		return
 	}
 
@@ -156,12 +184,19 @@ func (h *Handler) handleIssueByPath(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) getIssue(w http.ResponseWriter, r *http.Request, id string) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is allowed")
+func (h *Handler) deleteIssue(w http.ResponseWriter, _ *http.Request, id string) {
+	if err := h.issues.Delete(context.Background(), id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		}
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Issue deleted"})
+}
 
+func (h *Handler) getIssue(w http.ResponseWriter, r *http.Request, id string) {
 	issue, err := h.issues.Get(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())

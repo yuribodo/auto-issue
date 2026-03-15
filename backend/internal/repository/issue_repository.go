@@ -24,6 +24,8 @@ type IssueRepository interface {
 	UpdateOutput(ctx context.Context, id string, output string, logs string) error
 	UpdatePR(ctx context.Context, id string, prURL string) error
 	UpdateCost(ctx context.Context, id string, costUSD float64, turns int) error
+	UpdateAgentInfo(ctx context.Context, id string, agentType string, agentModel string) error
+	Delete(ctx context.Context, id string) error
 }
 
 // PGIssueRepository implements IssueRepository backed by PostgreSQL via GORM.
@@ -39,9 +41,16 @@ func NewPGIssueRepository(db *gorm.DB) *PGIssueRepository {
 // Compile-time interface verification.
 var _ IssueRepository = (*PGIssueRepository)(nil)
 
+func (r *PGIssueRepository) nextRunNumber(ctx context.Context) int {
+	var maxNum int
+	r.db.WithContext(ctx).Model(&models.Issue{}).Select("COALESCE(MAX(run_number), 0)").Scan(&maxNum)
+	return maxNum + 1
+}
+
 func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, repoPath string) (*models.Issue, error) {
 	issue := models.Issue{
 		IssueID:     id,
+		RunNumber:   r.nextRunNumber(ctx),
 		Title:       title,
 		Description: description,
 		RepoPath:    repoPath,
@@ -58,6 +67,7 @@ func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, 
 func (r *PGIssueRepository) CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error) {
 	issue := models.Issue{
 		IssueID:     id,
+		RunNumber:   r.nextRunNumber(ctx),
 		Title:       title,
 		Description: description,
 		RepoPath:    repoPath,
@@ -186,4 +196,24 @@ func (r *PGIssueRepository) UpdateCost(ctx context.Context, id string, costUSD f
 			"cost_usd": costUSD,
 			"turns":    turns,
 		}).Error
+}
+
+func (r *PGIssueRepository) UpdateAgentInfo(ctx context.Context, id string, agentType string, agentModel string) error {
+	return r.db.WithContext(ctx).Model(&models.Issue{}).
+		Where("issue_id = ?", id).
+		Updates(map[string]any{
+			"agent_type":  agentType,
+			"agent_model": agentModel,
+		}).Error
+}
+
+func (r *PGIssueRepository) Delete(ctx context.Context, id string) error {
+	result := r.db.WithContext(ctx).Where("issue_id = ?", id).Delete(&models.Issue{})
+	if result.Error != nil {
+		return fmt.Errorf("deleting issue: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("issue %q not found", id)
+	}
+	return nil
 }
