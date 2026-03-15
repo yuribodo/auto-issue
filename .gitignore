@@ -140,3 +140,6 @@ vite.config.ts.timestamp-*
 
 # Electron builder output
 desktop/release/
+
+# Bundled backend binary (built by scripts/build-backend.sh)
+desktop/resources/backend/
