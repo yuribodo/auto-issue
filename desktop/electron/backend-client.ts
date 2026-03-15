@@ -4,7 +4,8 @@
 import http from 'node:http'
 import type { Run, SSEEvent, CreateRunParams } from './shared-types'
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080'
+let BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080'
+export function setBackendUrl(url: string): void { BACKEND_URL = url }
 
 // --- HTTP helpers ---
 

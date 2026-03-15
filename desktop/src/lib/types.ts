@@ -123,6 +123,8 @@ export interface SettingsData {
   polling_enabled?: boolean
   polling_interval: number
   monitored_repos: string[]
+  // PostgreSQL connection string for bundled backend.
+  database_url?: string
 }
 
 export interface CreateRunParams {
