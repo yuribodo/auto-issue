@@ -43,11 +43,21 @@ export default function CreateRun() {
   // Load repos and config, then filter to only show monitored repos
   useEffect(() => {
     setReposLoading(true)
-    Promise.all([getGitHubRepos(1), getConfig()])
-      .then(([r, config]) => {
+    getConfig()
+      .then(async (config) => {
         const monitored = config.monitored_repos ?? []
         setMonitoredRepos(monitored)
-        setRepos(r)
+        // Fetch all pages until we have all repos (needed to find monitored repos beyond page 1)
+        const allRepos: GitHubRepo[] = []
+        let page = 1
+        const MAX_PAGES = 20
+        while (page <= MAX_PAGES) {
+          const batch = await getGitHubRepos(page)
+          allRepos.push(...batch)
+          if (batch.length < 30) break
+          page++
+        }
+        setRepos(allRepos)
         setReposLoading(false)
       })
       .catch((err) => {
