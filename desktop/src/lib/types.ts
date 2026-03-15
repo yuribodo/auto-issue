@@ -27,6 +27,7 @@ export interface Run {
   lines_added?: number
   lines_removed?: number
   cost_usd?: number
+  workspace_path?: string
 }
 
 export interface SSEEvent {

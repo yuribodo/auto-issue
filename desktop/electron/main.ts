@@ -23,7 +23,7 @@ import {
   getAuthToken,
 } from './auth'
 import { getUserRepos, getRepoIssues, getIssueDetail, createGitHubIssue } from './github'
-import { loadConfig, persistConfig, appendEvent, loadEvents } from './store'
+import { loadConfig, persistConfig, appendEvent, loadEvents, loadRuns, persistRuns } from './store'
 import {
   startTestRun,
   killAll,
@@ -36,10 +36,12 @@ import {
   backendCreateRun,
   backendStartRun,
   backendApproveRun,
+  backendCancelRun,
   backendDeleteRun,
   backendSubmitFeedback,
   backendSubscribeSSE,
   backendHealthCheck,
+  backendGetDiff,
   type SSEConnection,
 } from './backend-client'
 import type { SSEEvent, SettingsData, CreateRunParams, Provider } from './shared-types'
@@ -110,16 +112,18 @@ function registerIpcHandlers() {
   // --- Runs ---
   ipcMain.handle('runs:list', async () => {
     if (!useBackend) {
-      // Fallback: import runner dynamically
       const { getAllRuns } = await import('./runner')
       return getAllRuns()
     }
     try {
-      return await backendListRuns()
+      const user = await handleGetMe()
+      const runs = await backendListRuns(user?.login)
+      // Cache locally to survive restarts
+      persistRuns(runs)
+      return runs
     } catch (err) {
-      console.error('[backend] list runs failed, falling back to local:', err)
-      const { getAllRuns } = await import('./runner')
-      return getAllRuns()
+      console.error('[backend] list runs failed, falling back to local cache:', err)
+      return loadRuns()
     }
   })
 
@@ -129,10 +133,20 @@ function registerIpcHandlers() {
       return getRun(id)
     }
     try {
-      return await backendGetRun(id)
+      const run = await backendGetRun(id)
+      if (run) {
+        // Update local cache
+        const runs = loadRuns()
+        const idx = runs.findIndex((r) => r.id === id)
+        if (idx >= 0) runs[idx] = run
+        else runs.push(run)
+        persistRuns(runs)
+      }
+      return run
     } catch {
-      const { getRun } = await import('./runner')
-      return getRun(id)
+      // Fallback: read from cache
+      const runs = loadRuns()
+      return runs.find((r) => r.id === id) || null
     }
   })
 
@@ -147,8 +161,15 @@ function registerIpcHandlers() {
     }
 
     // Create issue in backend, then start it
-    const run = await backendCreateRun(params)
+    const user = await handleGetMe()
+    if (!user?.login) throw new Error('Not authenticated — cannot create run without GitHub user')
+    const run = await backendCreateRun(params, user.login)
     console.log(`[backend] Created issue ${run.id}, starting...`)
+
+    // Cache locally
+    const runs = loadRuns()
+    runs.push(run)
+    persistRuns(runs)
 
     // Start the run (moves to developing → agent kicks in on backend)
     backendStartRun(run.id).catch((err) => {
@@ -172,8 +193,16 @@ function registerIpcHandlers() {
       cancelRun(id)
       return
     }
-    // Backend doesn't have cancel yet — cleanup SSE
+    await backendCancelRun(id)
     unsubscribeFromRunEvents(id)
+    // Update local cache
+    const runs = loadRuns()
+    const run = runs.find((r) => r.id === id)
+    if (run) {
+      run.status = 'failed'
+      run.finished_at = new Date().toISOString()
+      persistRuns(runs)
+    }
   })
 
   ipcMain.handle('runs:delete', async (_event, id: string) => {
@@ -184,6 +213,9 @@ function registerIpcHandlers() {
       return
     }
     await backendDeleteRun(id)
+    // Remove from local cache
+    const runs = loadRuns().filter((r) => r.id !== id)
+    persistRuns(runs)
   })
 
   ipcMain.handle('runs:approve', async (_event, id: string) => {
@@ -201,6 +233,14 @@ function registerIpcHandlers() {
 
     await backendApproveRun(id)
     unsubscribeFromRunEvents(id)
+    // Update local cache
+    const runs = loadRuns()
+    const run = runs.find((r) => r.id === id)
+    if (run) {
+      run.status = 'done'
+      run.finished_at = new Date().toISOString()
+      persistRuns(runs)
+    }
   })
 
   ipcMain.handle('runs:reject', async (_event, id: string, feedback?: string) => {
@@ -216,6 +256,13 @@ function registerIpcHandlers() {
       return
     }
     await backendSubmitFeedback(id, feedback || 'Rejected by user — please fix the issues and try again.')
+    // Update local cache
+    const runs = loadRuns()
+    const run = runs.find((r) => r.id === id)
+    if (run) {
+      run.status = 'running'
+      persistRuns(runs)
+    }
     // Re-subscribe to SSE since the agent will restart
     subscribeToRunEvents(id)
   })
@@ -223,6 +270,17 @@ function registerIpcHandlers() {
   ipcMain.handle('run:events:get', (_event, runId: string) => {
     // Always load from local cache (events are persisted locally via SSE handler)
     return loadEvents(runId)
+  })
+
+  // --- Diff ---
+  ipcMain.handle('runs:diff', async (_event, id: string) => {
+    return await backendGetDiff(id)
+  })
+
+  // --- Workspace ---
+  ipcMain.handle('workspace:open-in-cursor', async (_event, workspacePath: string) => {
+    const { exec } = await import('node:child_process')
+    exec(`cursor "${workspacePath}"`)
   })
 
   // --- Config ---
@@ -303,7 +361,10 @@ app.whenReady().then(async () => {
 
     // Subscribe to SSE for any currently running issues
     try {
-      const runs = await backendListRuns()
+      const user = await handleGetMe()
+      const runs = await backendListRuns(user?.login)
+      // Cache locally to survive restarts
+      persistRuns(runs)
       for (const run of runs) {
         if (run.status === 'running') {
           subscribeToRunEvents(run.id)

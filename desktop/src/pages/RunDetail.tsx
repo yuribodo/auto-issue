@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { Run } from '../lib/types'
-import { getRun, cancelRun, deleteRun } from '../lib/ipc'
+import { getRun, cancelRun, deleteRun, openInCursor } from '../lib/ipc'
 import ProviderBadge from '../components/ProviderBadge'
 import ApprovePanel from '../components/ApprovePanel'
 import AgentTerminal from '../components/AgentTerminal'
+import DiffViewer from '../components/DiffViewer'
 
 const STATUS_COLORS: Record<string, string> = {
   queued: 'var(--fg-muted)',
@@ -27,15 +28,21 @@ function formatRelativeTime(iso: string): string {
   return `${secs}s ago`
 }
 
+type Tab = 'terminal' | 'changes'
+
 export default function RunDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [run, setRun] = useState<Run | null>(null)
+  const [activeTab, setActiveTab] = useState<Tab>('terminal')
+
+  const showTabs = run && run.workspace_path && (
+    run.status === 'awaiting_approval' || run.status === 'done'
+  )
 
   useEffect(() => {
     if (!id) return
     getRun(id).then(setRun)
-    // Poll for status updates while running
     const interval = setInterval(() => {
       getRun(id).then(setRun)
     }, 3000)
@@ -63,7 +70,7 @@ export default function RunDetail() {
     return (
       <div style={styles.page}>
         <div style={styles.backLink} onClick={() => navigate('/dashboard')}>
-          ← Dashboard
+          &larr; Dashboard
         </div>
         <div style={styles.loading}>Loading...</div>
       </div>
@@ -76,7 +83,7 @@ export default function RunDetail() {
     <div style={styles.page}>
       {/* Back link */}
       <div style={styles.backLink} onClick={() => navigate('/dashboard')}>
-        ← Dashboard
+        &larr; Dashboard
       </div>
 
       {/* Header */}
@@ -93,74 +100,82 @@ export default function RunDetail() {
             {run.status.toUpperCase().replace('_', ' ')}
           </span>
           <ProviderBadge provider={run.provider} model={run.model} />
-          {run.status === 'running' && (
-            <button style={styles.cancelBtn} onClick={handleCancel}>
-              Cancel Run
-            </button>
-          )}
-          {run.status !== 'running' && (
-            <button style={styles.deleteBtn} onClick={handleDelete}>
-              Delete
-            </button>
-          )}
+
+          {/* Right-aligned actions */}
+          <div style={styles.headerActions}>
+            {run.workspace_path && (
+              <button
+                style={styles.headerActionBtn}
+                onClick={() => openInCursor(run.workspace_path!)}
+              >
+                Open in Cursor
+              </button>
+            )}
+            {run.pr_url && (
+              <button
+                style={styles.headerActionBtn}
+                onClick={() => window.electronAPI.invoke('shell:open-external', run.pr_url)}
+              >
+                View PR
+              </button>
+            )}
+            {run.status === 'running' ? (
+              <button style={styles.cancelBtn} onClick={handleCancel}>
+                Cancel
+              </button>
+            ) : (
+              <button style={styles.deleteBtn} onClick={handleDelete}>
+                Delete
+              </button>
+            )}
+          </div>
         </div>
         <div style={styles.issueTitle}>{run.issue_title}</div>
         <div style={styles.meta}>
           <span style={styles.metaItem}>{run.repo}</span>
-          <span style={styles.metaSep}>·</span>
+          <span style={styles.metaSep}>&middot;</span>
           <span style={styles.metaItem}>{run.turns} turns</span>
-          <span style={styles.metaSep}>·</span>
+          <span style={styles.metaSep}>&middot;</span>
           <span style={styles.metaItem}>started {formatRelativeTime(run.started_at)}</span>
           {run.cost_usd !== undefined && (
             <>
-              <span style={styles.metaSep}>·</span>
+              <span style={styles.metaSep}>&middot;</span>
               <span style={styles.metaItem}>${run.cost_usd.toFixed(2)}</span>
             </>
           )}
         </div>
       </div>
 
-      {/* Changes Summary */}
-      {(run.files_changed !== undefined || run.pr_url) && (
-        <div style={styles.changesBar}>
-          {run.files_changed !== undefined && (
-            <div style={styles.changesSummary}>
-              <span style={styles.changesItem}>
-                {run.files_changed} files changed
-              </span>
-              {run.lines_added !== undefined && (
-                <span style={{ ...styles.changesItem, color: 'var(--accent)' }}>
-                  +{run.lines_added}
-                </span>
-              )}
-              {run.lines_removed !== undefined && (
-                <span style={{ ...styles.changesItem, color: 'var(--red)' }}>
-                  -{run.lines_removed}
-                </span>
-              )}
-            </div>
-          )}
-          {run.pr_url && (
-            <a
-              href={run.pr_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={styles.viewPrBtn}
-            >
-              View PR on GitHub →
-            </a>
-          )}
-        </div>
-      )}
-
       {/* Approve Panel */}
       {run.status === 'awaiting_approval' && (
         <ApprovePanel run={run} onApproved={refetchRun} onRejected={refetchRun} />
       )}
 
-      {/* Terminal */}
-      <div style={styles.terminalWrapper}>
-        <AgentTerminal runId={run.id} run={run} />
+      {/* Tab bar — only when there are changes to show */}
+      {showTabs && (
+        <div style={styles.tabBar}>
+          {(['terminal', 'changes'] as Tab[]).map((tab) => (
+            <button
+              key={tab}
+              style={{
+                ...styles.tab,
+                ...(activeTab === tab ? styles.tabActive : {}),
+              }}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === 'terminal' ? 'Terminal' : 'Changes'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Content area */}
+      <div style={styles.contentWrapper}>
+        {showTabs && activeTab === 'changes' ? (
+          <DiffViewer runId={run.id} />
+        ) : (
+          <AgentTerminal runId={run.id} run={run} />
+        )}
       </div>
     </div>
   )
@@ -215,6 +230,24 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '1px 6px',
   },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginLeft: 'auto',
+  },
+  headerActionBtn: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '10px',
+    letterSpacing: '0.06em',
+    color: 'var(--fg-muted)',
+    background: 'transparent',
+    border: '1px solid var(--border-mid)',
+    borderRadius: '4px',
+    padding: '3px 10px',
+    cursor: 'pointer',
+    transition: 'all 150ms ease',
+  },
   issueTitle: {
     fontFamily: 'var(--font-mono)',
     fontSize: '14px',
@@ -237,37 +270,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '11px',
     color: 'var(--fg-muted)',
   },
-  changesBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '10px 14px',
-    background: 'var(--bg2)',
-    border: '1px solid var(--border-mid)',
-    borderRadius: '6px',
-  },
-  changesSummary: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  changesItem: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '12px',
-    color: 'var(--fg)',
-    letterSpacing: '0.04em',
-  },
-  viewPrBtn: {
-    fontFamily: 'var(--font-mono)',
-    fontSize: '12px',
-    color: 'var(--blue)',
-    textDecoration: 'none',
-    letterSpacing: '0.04em',
-    padding: '4px 12px',
-    border: '1px solid rgba(66,165,245,0.3)',
-    borderRadius: '4px',
-    transition: 'all 150ms ease',
-  },
   cancelBtn: {
     fontFamily: 'var(--font-mono)',
     fontSize: '10px',
@@ -276,9 +278,8 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'transparent',
     border: '1px solid var(--red)',
     borderRadius: '4px',
-    padding: '2px 10px',
+    padding: '3px 10px',
     cursor: 'pointer',
-    marginLeft: 'auto',
   },
   deleteBtn: {
     fontFamily: 'var(--font-mono)',
@@ -288,14 +289,39 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'transparent',
     border: '1px solid var(--border-mid)',
     borderRadius: '4px',
-    padding: '2px 10px',
+    padding: '3px 10px',
     cursor: 'pointer',
-    marginLeft: 'auto',
   },
-  terminalWrapper: {
+  tabBar: {
+    display: 'flex',
+    gap: '0',
+    borderBottom: '1px solid var(--border-mid)',
+    marginBottom: '-12px',
+  },
+  tab: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '11px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+    padding: '8px 14px',
+    background: 'transparent',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    color: 'var(--fg-muted)',
+    cursor: 'pointer',
+    transition: 'all 150ms ease',
+  },
+  tabActive: {
+    color: 'var(--fg)',
+    borderBottomColor: 'var(--accent)',
+  },
+  contentWrapper: {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
+    borderRadius: '6px',
+    overflow: 'hidden',
+    border: '1px solid var(--border-mid)',
   },
 }
