@@ -3,6 +3,7 @@ module auto-issue
 go 1.26.1
 
 require (
+	github.com/creack/pty v1.1.24
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )

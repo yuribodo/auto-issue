@@ -15,7 +15,7 @@ import (
 func TestBuildPromptDeveloping(t *testing.T) {
 	r := NewRunner(config.AgentConfig{
 		Prompt: "Be concise.",
-	})
+	}, "")
 
 	got := r.buildPrompt("developing", "Fix the login bug")
 	want := "Be concise.\n\nFix the login bug"
@@ -25,7 +25,7 @@ func TestBuildPromptDeveloping(t *testing.T) {
 }
 
 func TestBuildPromptDevelopingNoSystemPrompt(t *testing.T) {
-	r := NewRunner(config.AgentConfig{})
+	r := NewRunner(config.AgentConfig{}, "")
 
 	got := r.buildPrompt("developing", "Fix the login bug")
 	want := "Fix the login bug"
@@ -37,7 +37,7 @@ func TestBuildPromptDevelopingNoSystemPrompt(t *testing.T) {
 func TestBuildPromptCodeReviewing(t *testing.T) {
 	r := NewRunner(config.AgentConfig{
 		Prompt: "Be thorough.",
-	})
+	}, "")
 
 	got := r.buildPrompt("code_reviewing", "Fix the login bug")
 	if got == "" {
@@ -55,37 +55,48 @@ func TestBuildPromptCodeReviewing(t *testing.T) {
 	}
 }
 
-func TestBuildArgsClaude(t *testing.T) {
+func TestBuildStreamArgsClaude(t *testing.T) {
 	r := NewRunner(config.AgentConfig{
 		Type:  "claude-code",
 		Model: "claude-opus-4-6",
-	})
+	}, "")
 
-	args := r.buildArgs("solve this")
-	if len(args) < 4 {
-		t.Fatalf("expected at least 4 args, got %d: %v", len(args), args)
+	args := r.buildStreamArgs("solve this")
+	if len(args) < 2 {
+		t.Fatalf("expected at least 2 args, got %d: %v", len(args), args)
 	}
-	if args[0] != "--print" {
-		t.Errorf("args[0] = %q, want --print", args[0])
+	if args[0] != "-p" {
+		t.Errorf("args[0] = %q, want -p", args[0])
 	}
 	if args[1] != "solve this" {
 		t.Errorf("args[1] = %q, want prompt", args[1])
 	}
-	if args[2] != "--model" {
-		t.Errorf("args[2] = %q, want --model", args[2])
+	// Should contain --verbose and --output-format stream-json
+	foundVerbose := false
+	foundStreamJson := false
+	for i, arg := range args {
+		if arg == "--verbose" {
+			foundVerbose = true
+		}
+		if arg == "--output-format" && i+1 < len(args) && args[i+1] == "stream-json" {
+			foundStreamJson = true
+		}
 	}
-	if args[3] != "claude-opus-4-6" {
-		t.Errorf("args[3] = %q, want claude-opus-4-6", args[3])
+	if !foundVerbose {
+		t.Error("expected --verbose flag")
+	}
+	if !foundStreamJson {
+		t.Error("expected --output-format stream-json")
 	}
 }
 
 func TestCommandName(t *testing.T) {
-	r := NewRunner(config.AgentConfig{Type: "claude-code"})
+	r := NewRunner(config.AgentConfig{Type: "claude-code"}, "")
 	if r.command() != "claude" {
 		t.Errorf("command() = %q, want %q", r.command(), "claude")
 	}
 
-	r2 := NewRunner(config.AgentConfig{Type: "custom-agent"})
+	r2 := NewRunner(config.AgentConfig{Type: "custom-agent"}, "")
 	if r2.command() != "custom-agent" {
 		t.Errorf("command() = %q, want %q", r2.command(), "custom-agent")
 	}
@@ -133,6 +144,24 @@ func TestRunWithRealProcess(t *testing.T) {
 	err = cmd2.Run()
 	if err == nil {
 		t.Error("expected timeout error")
+	}
+}
+
+func TestToolVerb(t *testing.T) {
+	tests := map[string]string{
+		"Read":  "READ",
+		"Edit":  "EDIT",
+		"Write": "WRITE",
+		"Bash":  "EXEC",
+		"Glob":  "FIND",
+		"Grep":  "SEARCH",
+		"Agent": "SPAWN",
+	}
+	for name, want := range tests {
+		got := toolVerb(name)
+		if got != want {
+			t.Errorf("toolVerb(%q) = %q, want %q", name, got, want)
+		}
 	}
 }
 

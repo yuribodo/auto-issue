@@ -48,6 +48,15 @@ func main() {
 		}
 	}
 
+	// Read GH_TOKEN from environment
+	ghToken := os.Getenv("GH_TOKEN")
+	if ghToken == "" {
+		ghToken = os.Getenv("GITHUB_TOKEN")
+	}
+	if ghToken != "" {
+		slog.Info("GitHub token configured")
+	}
+
 	// Initialize workspace manager
 	wsMgr, err := workspace.NewManager(cfg.Workspace.BasePath)
 	if err != nil {
@@ -55,18 +64,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize agent runner and orchestrator
-	ag := agent.NewRunner(cfg.Agent)
-	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, cfg.MaxConcurrency)
+	// Initialize agent runner, broadcaster, and orchestrator
+	ag := agent.NewRunner(cfg.Agent, ghToken)
+	broadcaster := api.NewBroadcaster()
+	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, broadcaster, ghToken, cfg.MaxConcurrency)
 	orch.Start()
 
 	// Set up HTTP server
-	handler := api.NewHandler(issueRepo, configRepo, orch, cfg)
+	handler := api.NewHandler(issueRepo, configRepo, orch, cfg, broadcaster)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
+	// Wrap with CORS middleware
+	corsHandler := api.CORSMiddleware(mux)
+
 	addr := fmt.Sprintf(":%d", cfg.APIPort)
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{Addr: addr, Handler: corsHandler}
 
 	// Graceful shutdown on SIGINT/SIGTERM
 	sigCh := make(chan os.Signal, 1)

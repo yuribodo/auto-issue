@@ -23,22 +23,29 @@ import {
   getAuthToken,
 } from './auth'
 import { getUserRepos, getRepoIssues, getIssueDetail } from './github'
-import { loadConfig, persistConfig, loadRuns, persistRuns } from './store'
+import { loadConfig, persistConfig, appendEvent, loadEvents } from './store'
 import {
-  createRun,
-  startRun,
   startTestRun,
-  cancelRun,
-  getAllRuns,
-  getRun,
-  getRunEvents,
-  recoverRuns,
   killAll,
   setBroadcast,
 } from './runner'
+import {
+  backendListRuns,
+  backendGetRun,
+  backendCreateRun,
+  backendStartRun,
+  backendApproveRun,
+  backendSubscribeSSE,
+  backendHealthCheck,
+  type SSEConnection,
+} from './backend-client'
 import type { SSEEvent, SettingsData, CreateRunParams, Provider } from './shared-types'
 
 let mainWindow: BrowserWindow | null = null
+let useBackend = false
+
+// Track active SSE subscriptions per run
+const sseSubscriptions = new Map<string, SSEConnection>()
 
 function broadcastEvent(runId: string, event: SSEEvent) {
   mainWindow?.webContents.send('run:event', { runId, event })
@@ -72,55 +79,136 @@ function createWindow() {
   })
 }
 
-function registerIpcHandlers() {
-  // --- Runs ---
-  ipcMain.handle('runs:list', () => {
-    return getAllRuns()
+// Subscribe to SSE for a run and forward events to renderer
+function subscribeToRunEvents(runId: string) {
+  // Don't double-subscribe
+  if (sseSubscriptions.has(runId)) return
+
+  const conn = backendSubscribeSSE(runId, (event) => {
+    // Persist event locally for history
+    appendEvent(runId, event)
+    // Forward to renderer
+    broadcastEvent(runId, event)
   })
 
-  ipcMain.handle('runs:get', (_event, id: string) => {
-    return getRun(id)
+  sseSubscriptions.set(runId, conn)
+}
+
+// Cleanup SSE subscription for a run
+function unsubscribeFromRunEvents(runId: string) {
+  const conn = sseSubscriptions.get(runId)
+  if (conn) {
+    conn.close()
+    sseSubscriptions.delete(runId)
+  }
+}
+
+function registerIpcHandlers() {
+  // --- Runs ---
+  ipcMain.handle('runs:list', async () => {
+    if (!useBackend) {
+      // Fallback: import runner dynamically
+      const { getAllRuns } = await import('./runner')
+      return getAllRuns()
+    }
+    try {
+      return await backendListRuns()
+    } catch (err) {
+      console.error('[backend] list runs failed, falling back to local:', err)
+      const { getAllRuns } = await import('./runner')
+      return getAllRuns()
+    }
+  })
+
+  ipcMain.handle('runs:get', async (_event, id: string) => {
+    if (!useBackend) {
+      const { getRun } = await import('./runner')
+      return getRun(id)
+    }
+    try {
+      return await backendGetRun(id)
+    } catch {
+      const { getRun } = await import('./runner')
+      return getRun(id)
+    }
   })
 
   ipcMain.handle('runs:create', async (_event, params: CreateRunParams) => {
-    const run = createRun(params)
-    // Start asynchronously — don't block the IPC response
-    startRun(run.id).catch((err) => {
-      console.error(`[runner] startRun error for ${run.id}:`, err)
+    if (!useBackend) {
+      const { createRun, startRun } = await import('./runner')
+      const run = createRun(params)
+      startRun(run.id).catch((err) => {
+        console.error(`[runner] startRun error for ${run.id}:`, err)
+      })
+      return run
+    }
+
+    // Create issue in backend, then start it
+    const run = await backendCreateRun(params)
+    console.log(`[backend] Created issue ${run.id}, starting...`)
+
+    // Start the run (moves to developing → agent kicks in on backend)
+    backendStartRun(run.id).catch((err) => {
+      console.error(`[backend] startRun error for ${run.id}:`, err)
     })
+
+    // Subscribe to SSE events from backend
+    subscribeToRunEvents(run.id)
+
     return run
   })
 
   ipcMain.handle('runs:test', async (_event, provider: Provider) => {
+    // Test runs always use local runner (no backend needed)
     return startTestRun(provider)
   })
 
-  ipcMain.handle('runs:cancel', (_event, id: string) => {
-    cancelRun(id)
+  ipcMain.handle('runs:cancel', async (_event, id: string) => {
+    if (!useBackend) {
+      const { cancelRun } = await import('./runner')
+      cancelRun(id)
+      return
+    }
+    // Backend doesn't have cancel yet — cleanup SSE
+    unsubscribeFromRunEvents(id)
   })
 
-  ipcMain.handle('runs:approve', (_event, id: string) => {
-    const runs = loadRuns()
-    const run = runs.find((r) => r.id === id)
-    if (run) {
-      run.status = 'done'
-      run.finished_at = new Date().toISOString()
-      persistRuns(runs)
+  ipcMain.handle('runs:approve', async (_event, id: string) => {
+    if (!useBackend) {
+      const { loadRuns, persistRuns } = await import('./store')
+      const runs = loadRuns()
+      const run = runs.find((r) => r.id === id)
+      if (run) {
+        run.status = 'done'
+        run.finished_at = new Date().toISOString()
+        persistRuns(runs)
+      }
+      return
     }
+
+    await backendApproveRun(id)
+    unsubscribeFromRunEvents(id)
   })
 
-  ipcMain.handle('runs:reject', (_event, id: string) => {
-    const runs = loadRuns()
-    const run = runs.find((r) => r.id === id)
-    if (run) {
-      run.status = 'failed'
-      run.finished_at = new Date().toISOString()
-      persistRuns(runs)
+  ipcMain.handle('runs:reject', async (_event, id: string) => {
+    if (!useBackend) {
+      const { loadRuns, persistRuns } = await import('./store')
+      const runs = loadRuns()
+      const run = runs.find((r) => r.id === id)
+      if (run) {
+        run.status = 'failed'
+        run.finished_at = new Date().toISOString()
+        persistRuns(runs)
+      }
+      return
     }
+    // Backend: submit feedback to reject (or just approve as done)
+    unsubscribeFromRunEvents(id)
   })
 
   ipcMain.handle('run:events:get', (_event, runId: string) => {
-    return getRunEvents(runId)
+    // Always load from local cache (events are persisted locally via SSE handler)
+    return loadEvents(runId)
   })
 
   // --- Config ---
@@ -170,9 +258,32 @@ function registerIpcHandlers() {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setBroadcast(broadcastEvent)
-  recoverRuns()
+
+  // Check if backend is available
+  useBackend = await backendHealthCheck()
+  if (useBackend) {
+    console.log('[main] Backend detected at', process.env.BACKEND_URL || 'http://localhost:8080')
+    console.log('[main] Using backend for run management')
+
+    // Subscribe to SSE for any currently running issues
+    try {
+      const runs = await backendListRuns()
+      for (const run of runs) {
+        if (run.status === 'running') {
+          subscribeToRunEvents(run.id)
+        }
+      }
+    } catch (err) {
+      console.error('[main] Failed to list running issues:', err)
+    }
+  } else {
+    console.log('[main] Backend not available, using local runner')
+    const { recoverRuns } = await import('./runner')
+    recoverRuns()
+  }
+
   registerIpcHandlers()
   createWindow()
 
@@ -190,5 +301,10 @@ app.on('window-all-closed', () => {
 })
 
 app.on('quit', () => {
+  // Close all SSE connections
+  for (const [, conn] of sseSubscriptions) {
+    conn.close()
+  }
+  sseSubscriptions.clear()
   killAll()
 })

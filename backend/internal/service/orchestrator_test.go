@@ -17,6 +17,11 @@ import (
 	"auto-issue/internal/workspace"
 )
 
+// noopBroadcaster implements EventBroadcaster for testing.
+type noopBroadcaster struct{}
+
+func (n *noopBroadcaster) Broadcast(issueID string, event agent.AgentEvent) {}
+
 func setupTestEnv(t *testing.T) (*Orchestrator, repository.IssueRepository, string) {
 	t.Helper()
 
@@ -48,9 +53,9 @@ func setupTestEnv(t *testing.T) (*Orchestrator, repository.IssueRepository, stri
 		Type:    "claude-code",
 		Model:   "test-model",
 		Timeout: config.Duration{Duration: 30 * time.Second},
-	})
+	}, "")
 
-	orch := NewOrchestrator(ws, issueRepo, runner, 2)
+	orch := NewOrchestrator(ws, issueRepo, runner, &noopBroadcaster{}, "", 2)
 	return orch, issueRepo, repoDir
 }
 
@@ -207,6 +212,25 @@ func TestBuildIssuePrompt(t *testing.T) {
 	got = buildIssuePrompt(issue)
 	if !containsStr(got, "Previous human feedback") || !containsStr(got, "Add error handling") {
 		t.Errorf("prompt with feedback should include feedback:\n%q", got)
+	}
+}
+
+func TestBuildIssuePromptGithub(t *testing.T) {
+	issue := &models.Issue{
+		Title:       "Fix login",
+		Description: "Login is broken",
+		GithubRepo:  "owner/repo",
+		IssueNumber: 42,
+	}
+	got := buildIssuePrompt(issue)
+	if !containsStr(got, "owner/repo") {
+		t.Error("github prompt should contain repo name")
+	}
+	if !containsStr(got, "#42") {
+		t.Error("github prompt should contain issue number")
+	}
+	if !containsStr(got, "gh pr create") {
+		t.Error("github prompt should contain PR creation instructions")
 	}
 }
 
