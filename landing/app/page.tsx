@@ -1,4 +1,5 @@
 import IssueFlow from "./issue-flow";
+import { DownloadButton, AltDownloads } from "./download-button";
 
 export default function Home() {
   return (
@@ -27,12 +28,7 @@ export default function Home() {
             </p>
 
             <div className="hero-ctas fade-up" style={{ animationDelay: "300ms" }}>
-              <a
-                href="https://github.com/yuribodo/auto-issue/releases/latest"
-                className="btn-primary"
-              >
-                Download for macOS →
-              </a>
+              <DownloadButton className="btn-primary" />
               <a
                 href="https://github.com/yuribodo/auto-issue"
                 target="_blank"
@@ -44,20 +40,7 @@ export default function Home() {
             </div>
 
             <div className="hero-alt-downloads fade-up" style={{ animationDelay: "300ms" }}>
-              <span className="alt-download-label">Also available for</span>
-              <a
-                href="https://github.com/yuribodo/auto-issue/releases/latest"
-                className="alt-download-link"
-              >
-                Windows
-              </a>
-              <span className="alt-download-sep">·</span>
-              <a
-                href="https://github.com/yuribodo/auto-issue/releases/latest"
-                className="alt-download-link"
-              >
-                Linux
-              </a>
+              <AltDownloads />
             </div>
           </div>
 
@@ -120,12 +103,7 @@ export default function Home() {
             Connect your repository and watch the first PR open itself.
           </p>
           <div className="final-cta-buttons">
-            <a
-              href="https://github.com/yuribodo/auto-issue/releases/latest"
-              className="btn-primary"
-            >
-              Download for macOS →
-            </a>
+            <DownloadButton className="btn-primary" />
             <a
               href="https://github.com/yuribodo/auto-issue"
               target="_blank"
