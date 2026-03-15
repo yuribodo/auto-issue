@@ -108,7 +108,7 @@ func TestGetStatus(t *testing.T) {
 			setupIssues: func(t *testing.T, h *Handler) {
 				t.Helper()
 				ctx := t.Context()
-				if _, err := h.issues.Create(ctx, "active-1", "Active", "desc", "/tmp"); err != nil {
+				if _, err := h.issues.Create(ctx, "active-1", "Active", "desc", "/tmp", "testuser"); err != nil {
 					t.Fatalf("creating issue: %v", err)
 				}
 				if err := h.issues.Transition(ctx, "active-1", constants.PhaseDeveloping); err != nil {
@@ -156,14 +156,20 @@ func TestCreateIssue(t *testing.T) {
 	}{
 		{
 			name:      "valid issue",
-			body:      map[string]string{"title": "Test issue", "description": "A test", "repo_path": "/tmp/repo"},
+			body:      map[string]string{"title": "Test issue", "description": "A test", "repo_path": "/tmp/repo", "github_user": "testuser"},
 			wantCode:  http.StatusCreated,
 			wantPhase: "backlog",
 			wantTitle: "Test issue",
 		},
 		{
 			name:       "missing title",
-			body:       map[string]string{"description": "no title"},
+			body:       map[string]string{"description": "no title", "github_user": "testuser"},
+			wantCode:   http.StatusBadRequest,
+			wantErrKey: "invalid_request",
+		},
+		{
+			name:       "missing github_user",
+			body:       map[string]string{"title": "Test issue", "description": "A test"},
 			wantCode:   http.StatusBadRequest,
 			wantErrKey: "invalid_request",
 		},
@@ -214,10 +220,10 @@ func TestListIssues(t *testing.T) {
 			h, mux := setupTestHandler(t)
 			ctx := t.Context()
 
-			if _, err := h.issues.Create(ctx, "list-1", "Issue 1", "desc1", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(ctx, "list-1", "Issue 1", "desc1", "/tmp/repo", "testuser"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
-			if _, err := h.issues.Create(ctx, "list-2", "Issue 2", "desc2", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(ctx, "list-2", "Issue 2", "desc2", "/tmp/repo", "testuser"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
 
@@ -255,7 +261,7 @@ func TestGetIssue(t *testing.T) {
 			h, mux := setupTestHandler(t)
 
 			if tt.create {
-				if _, err := h.issues.Create(t.Context(), tt.issueID, "Get me", "desc", "/tmp/repo"); err != nil {
+				if _, err := h.issues.Create(t.Context(), tt.issueID, "Get me", "desc", "/tmp/repo", "testuser"); err != nil {
 					t.Fatalf("creating issue: %v", err)
 				}
 			}
@@ -324,7 +330,7 @@ func TestMoveIssue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h, mux := setupTestHandler(t)
 
-			if _, err := h.issues.Create(t.Context(), "move-test", "Move me", "desc", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(t.Context(), "move-test", "Move me", "desc", "/tmp/repo", "testuser"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
 			tt.setupPhase(t, h)
@@ -390,7 +396,7 @@ func TestFeedback(t *testing.T) {
 			h, mux := setupTestHandler(t)
 			ctx := t.Context()
 
-			if _, err := h.issues.Create(ctx, "fb-test", "Feedback issue", "desc", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(ctx, "fb-test", "Feedback issue", "desc", "/tmp/repo", "testuser"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
 

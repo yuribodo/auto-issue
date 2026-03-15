@@ -81,7 +81,7 @@ func TestProcessIssueFullCycle(t *testing.T) {
 	defer orch.Shutdown()
 	ctx := context.Background()
 
-	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir)
+	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir, "testuser")
 	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 
 	err := orch.processIssue("issue-1")
@@ -106,7 +106,7 @@ func TestProcessIssueWithFeedback(t *testing.T) {
 	defer orch.Shutdown()
 	ctx := context.Background()
 
-	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir)
+	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir, "testuser")
 	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 	orch.processIssue("issue-1")
 
@@ -138,7 +138,7 @@ func TestProcessIssueWrongPhase(t *testing.T) {
 	orch, repo, repoDir := setupTestEnv(t)
 	defer orch.Shutdown()
 
-	repo.Create(context.Background(), "issue-1", "Feature", "Desc", repoDir)
+	repo.Create(context.Background(), "issue-1", "Feature", "Desc", repoDir, "testuser")
 	err := orch.processIssue("issue-1")
 	if err == nil {
 		t.Fatal("expected error for wrong phase")
@@ -151,7 +151,7 @@ func TestEnqueueAndProcess(t *testing.T) {
 	defer orch.Shutdown()
 	ctx := context.Background()
 
-	repo.Create(ctx, "issue-1", "Feature", "Build it", repoDir)
+	repo.Create(ctx, "issue-1", "Feature", "Build it", repoDir, "testuser")
 	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 
 	orch.Enqueue("issue-1")
@@ -175,7 +175,7 @@ func TestConcurrentIssues(t *testing.T) {
 
 	for i := 1; i <= 3; i++ {
 		id := fmt.Sprintf("issue-%d", i)
-		repo.Create(ctx, id, fmt.Sprintf("Feature %d", i), "Build it", repoDir)
+		repo.Create(ctx, id, fmt.Sprintf("Feature %d", i), "Build it", repoDir, "testuser")
 		repo.Transition(ctx, id, constants.PhaseDeveloping)
 		orch.Enqueue(id)
 	}

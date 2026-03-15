@@ -26,7 +26,7 @@ func NewMemoryIssueRepository() *MemoryIssueRepository {
 // Compile-time interface verification.
 var _ IssueRepository = (*MemoryIssueRepository)(nil)
 
-func (r *MemoryIssueRepository) Create(_ context.Context, id, title, description, repoPath string) (*models.Issue, error) {
+func (r *MemoryIssueRepository) Create(_ context.Context, id, title, description, repoPath, githubUser string) (*models.Issue, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -36,6 +36,7 @@ func (r *MemoryIssueRepository) Create(_ context.Context, id, title, description
 
 	issue := &models.Issue{
 		IssueID:     id,
+		GithubUser:  githubUser,
 		Title:       title,
 		Description: description,
 		Phase:       constants.PhaseBacklog,
@@ -56,13 +57,16 @@ func (r *MemoryIssueRepository) Get(_ context.Context, id string) (*models.Issue
 	return copyIssue(issue), nil
 }
 
-func (r *MemoryIssueRepository) List(_ context.Context, phaseFilter string) ([]*models.Issue, error) {
+func (r *MemoryIssueRepository) List(_ context.Context, phaseFilter, githubUser string) ([]*models.Issue, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []*models.Issue
 	for _, issue := range r.issues {
 		if phaseFilter != "" && issue.Phase != phaseFilter {
+			continue
+		}
+		if githubUser != "" && issue.GithubUser != githubUser {
 			continue
 		}
 		result = append(result, copyIssue(issue))
@@ -152,7 +156,7 @@ func (r *MemoryIssueRepository) UpdateOutput(_ context.Context, id string, outpu
 	return nil
 }
 
-func (r *MemoryIssueRepository) CreateWithGithub(_ context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error) {
+func (r *MemoryIssueRepository) CreateWithGithub(_ context.Context, id, title, description, repoPath, githubRepo string, issueNumber int, githubUser string) (*models.Issue, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -162,6 +166,7 @@ func (r *MemoryIssueRepository) CreateWithGithub(_ context.Context, id, title, d
 
 	issue := &models.Issue{
 		IssueID:     id,
+		GithubUser:  githubUser,
 		Title:       title,
 		Description: description,
 		Phase:       constants.PhaseBacklog,
