@@ -22,13 +22,14 @@ import {
   handleLogout,
   getAuthToken,
 } from './auth'
-import { getUserRepos, getRepoIssues, getIssueDetail } from './github'
+import { getUserRepos, getRepoIssues, getIssueDetail, createGitHubIssue } from './github'
 import { loadConfig, persistConfig, appendEvent, loadEvents } from './store'
 import {
   startTestRun,
   killAll,
   setBroadcast,
 } from './runner'
+import { startPoller, stopPoller, updatePollerConfig, syncNow } from './poller'
 import {
   backendListRuns,
   backendGetRun,
@@ -231,6 +232,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('config:save', (_event, config: SettingsData) => {
     persistConfig(config)
+    const token = getAuthToken()
+    if (token) {
+      updatePollerConfig({
+        enabled: config.polling_enabled !== false,
+        intervalSeconds: config.polling_interval || 5,
+        monitoredRepos: config.monitored_repos || []
+      }, token)
+    }
   })
 
   // --- Shell ---
@@ -255,6 +264,18 @@ function registerIpcHandlers() {
     const token = getAuthToken()
     if (!token) throw new Error('Not authenticated')
     return getIssueDetail(token, owner, repo, num)
+  })
+
+  ipcMain.handle('github:createIssue', async (_event, { owner, repo, title, body, labels }) => {
+    const token = getAuthToken()
+    if (!token) throw new Error('Not authenticated')
+    return createGitHubIssue(token, owner, repo, title, body, labels)
+  })
+
+  ipcMain.handle('poller:sync', async () => {
+    const token = getAuthToken()
+    if (!token) throw new Error('Not authenticated')
+    await syncNow(token)
   })
 
   // --- Auth ---
@@ -298,6 +319,27 @@ app.whenReady().then(async () => {
   }
 
   registerIpcHandlers()
+  // Initialize poller after IPC handlers are ready
+  const config = loadConfig()
+  const token = getAuthToken()
+  // Debug diagnostics for poller startup
+  console.debug('[main] Poller startup check:', {
+    enabledFlag: config.polling_enabled !== false,
+    tokenAvailable: !!token,
+    reposConfigured: config.monitored_repos?.length ?? 0,
+  })
+  if (config.polling_enabled !== false && token && config.monitored_repos?.length > 0) {
+    console.debug('[main] Starting poller with config', {
+      enabled: true,
+      intervalSeconds: config.polling_interval || 5,
+      monitoredRepos: config.monitored_repos,
+    })
+    startPoller({
+      enabled: true,
+      intervalSeconds: config.polling_interval || 5,
+      monitoredRepos: config.monitored_repos
+    }, token)
+  }
   createWindow()
 
   app.on('activate', () => {
@@ -314,6 +356,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('quit', () => {
+  // Stop poller before shutdown
+  stopPoller()
   // Close all SSE connections
   for (const [, conn] of sseSubscriptions) {
     conn.close()
