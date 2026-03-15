@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import type { Run } from '../lib/types'
-import { getRun, cancelRun } from '../lib/ipc'
+import { getRun, cancelRun, deleteRun } from '../lib/ipc'
 import ProviderBadge from '../components/ProviderBadge'
 import ApprovePanel from '../components/ApprovePanel'
 import AgentTerminal from '../components/AgentTerminal'
@@ -53,6 +53,12 @@ export default function RunDetail() {
     refetchRun()
   }
 
+  const handleDelete = async () => {
+    if (!id) return
+    await deleteRun(id)
+    navigate('/dashboard')
+  }
+
   if (!run) {
     return (
       <div style={styles.page}>
@@ -76,7 +82,7 @@ export default function RunDetail() {
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerTop}>
-          <span style={styles.issueNumber}>#{run.issue_number}</span>
+          <span style={styles.issueNumber}>#{run.run_number}</span>
           <span
             style={{
               ...styles.statusLabel,
@@ -90,6 +96,11 @@ export default function RunDetail() {
           {run.status === 'running' && (
             <button style={styles.cancelBtn} onClick={handleCancel}>
               Cancel Run
+            </button>
+          )}
+          {run.status !== 'running' && (
+            <button style={styles.deleteBtn} onClick={handleDelete}>
+              Delete
             </button>
           )}
         </div>
@@ -264,6 +275,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--red)',
     background: 'transparent',
     border: '1px solid var(--red)',
+    borderRadius: '4px',
+    padding: '2px 10px',
+    cursor: 'pointer',
+    marginLeft: 'auto',
+  },
+  deleteBtn: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '10px',
+    letterSpacing: '0.08em',
+    color: 'var(--fg-muted)',
+    background: 'transparent',
+    border: '1px solid var(--border-mid)',
     borderRadius: '4px',
     padding: '2px 10px',
     cursor: 'pointer',

@@ -10,6 +10,8 @@ interface ApprovePanelProps {
 
 export default function ApprovePanel({ run, onApproved, onRejected }: ApprovePanelProps) {
   const [loading, setLoading] = useState<'approve' | 'reject' | null>(null)
+  const [feedback, setFeedback] = useState('')
+  const [showFeedback, setShowFeedback] = useState(false)
 
   if (run.status !== 'awaiting_approval') return null
 
@@ -23,10 +25,14 @@ export default function ApprovePanel({ run, onApproved, onRejected }: ApprovePan
     }
   }
 
-  async function handleReject() {
+  async function handleRejectClick() {
+    if (!showFeedback) {
+      setShowFeedback(true)
+      return
+    }
     setLoading('reject')
     try {
-      await rejectRun(run.id)
+      await rejectRun(run.id, feedback || undefined)
       onRejected()
     } finally {
       setLoading(null)
@@ -49,6 +55,16 @@ export default function ApprovePanel({ run, onApproved, onRejected }: ApprovePan
         </button>
       )}
 
+      {showFeedback && (
+        <textarea
+          style={styles.feedbackInput}
+          placeholder="What needs to be fixed? (optional)"
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          rows={3}
+        />
+      )}
+
       <div style={styles.actions}>
         <button
           style={{
@@ -68,12 +84,21 @@ export default function ApprovePanel({ run, onApproved, onRejected }: ApprovePan
             opacity: isDisabled ? 0.6 : 1,
             cursor: isDisabled ? 'not-allowed' : 'pointer',
           }}
-          onClick={handleReject}
+          onClick={handleRejectClick}
           disabled={isDisabled}
         >
           {loading === 'reject' && <span style={styles.spinner} />}
-          Reject
+          {showFeedback ? 'Send Feedback' : 'Reject'}
         </button>
+        {showFeedback && (
+          <button
+            style={{ ...styles.rejectBtn, color: 'var(--fg-muted)', borderColor: 'var(--border-mid)' }}
+            onClick={() => setShowFeedback(false)}
+            disabled={isDisabled}
+          >
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   )
@@ -110,6 +135,20 @@ const styles: Record<string, React.CSSProperties> = {
     padding: 0,
     display: 'inline-block',
     marginBottom: '16px',
+  },
+  feedbackInput: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    color: 'var(--fg)',
+    background: 'var(--bg)',
+    border: '1px solid var(--border-mid)',
+    borderRadius: '6px',
+    padding: '10px 12px',
+    width: '100%',
+    resize: 'vertical' as const,
+    marginBottom: '12px',
+    outline: 'none',
+    boxSizing: 'border-box' as const,
   },
   actions: {
     display: 'flex',

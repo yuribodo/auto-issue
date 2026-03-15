@@ -3,6 +3,7 @@ import type { Run, SSEEvent, Repository, Issue, Notification, DailyStats, Provid
 export const MOCK_RUNS: Run[] = [
   {
     id: 'run-001',
+    run_number: 1,
     issue_number: 42,
     issue_title: 'Add dark mode toggle to settings page',
     repo: 'acme/webapp',
@@ -18,6 +19,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-002',
+    run_number: 2,
     issue_number: 87,
     issue_title: 'Fix pagination offset bug in /api/users',
     repo: 'acme/webapp',
@@ -36,12 +38,13 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-003',
+    run_number: 3,
     issue_number: 53,
     issue_title: 'Refactor auth middleware to use JWT',
     repo: 'acme/api-server',
     status: 'done',
     provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3.1-pro',
     started_at: new Date(Date.now() - 30 * 60_000).toISOString(),
     finished_at: new Date(Date.now() - 15 * 60_000).toISOString(),
     turns: 22,
@@ -54,6 +57,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-004',
+    run_number: 4,
     issue_number: 15,
     issue_title: 'Update README with new API endpoints',
     repo: 'acme/docs',
@@ -65,6 +69,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-005',
+    run_number: 5,
     issue_number: 99,
     issue_title: 'Migrate database schema to v3',
     repo: 'acme/webapp',
@@ -82,6 +87,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-006',
+    run_number: 6,
     issue_number: 31,
     issue_title: 'Add rate limiting to public API endpoints',
     repo: 'acme/api-server',
@@ -100,6 +106,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-007',
+    run_number: 7,
     issue_number: 12,
     issue_title: 'Fix broken image upload on mobile Safari',
     repo: 'acme/webapp',
@@ -118,12 +125,13 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-008',
+    run_number: 8,
     issue_number: 8,
     issue_title: 'Implement webhook retry logic with backoff',
     repo: 'acme/api-server',
     status: 'done',
     provider: 'gemini',
-    model: 'gemini-2.5-pro',
+    model: 'gemini-3.1-pro',
     started_at: new Date(Date.now() - 24 * 3600_000).toISOString(),
     finished_at: new Date(Date.now() - 23.5 * 3600_000).toISOString(),
     turns: 25,
@@ -136,6 +144,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-009',
+    run_number: 9,
     issue_number: 5,
     issue_title: 'Add search functionality to docs site',
     repo: 'acme/docs',
@@ -153,6 +162,7 @@ export const MOCK_RUNS: Run[] = [
   },
   {
     id: 'run-010',
+    run_number: 10,
     issue_number: 71,
     issue_title: 'Optimize database queries for user dashboard',
     repo: 'acme/webapp',
@@ -370,7 +380,7 @@ export const MOCK_SETTINGS: SettingsData = {
 }
 
 export const MOCK_MODELS: Record<string, string[]> = {
-  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+  openai: ['codex-mini-latest', 'gpt-5.4', 'gpt-5.3-codex'],
   anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
-  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  gemini: ['gemini-3.1-pro', 'gemini-3.1-flash-lite'],
 }

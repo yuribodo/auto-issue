@@ -20,12 +20,16 @@ export async function cancelRun(id: string): Promise<void> {
   await window.electronAPI.invoke('runs:cancel', id)
 }
 
+export async function deleteRun(id: string): Promise<void> {
+  await window.electronAPI.invoke('runs:delete', id)
+}
+
 export async function approveRun(id: string): Promise<void> {
   await window.electronAPI.invoke('runs:approve', id)
 }
 
-export async function rejectRun(id: string): Promise<void> {
-  await window.electronAPI.invoke('runs:reject', id)
+export async function rejectRun(id: string, feedback?: string): Promise<void> {
+  await window.electronAPI.invoke('runs:reject', id, feedback)
 }
 
 export async function getRunEvents(id: string): Promise<SSEEvent[]> {

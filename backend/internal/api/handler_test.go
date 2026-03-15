@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"auto-issue/internal/agent"
 	"auto-issue/internal/config"
 	"auto-issue/internal/constants"
 	"auto-issue/internal/repository"
@@ -47,9 +46,8 @@ func setupTestHandler(t *testing.T) (*Handler, *http.ServeMux) {
 		t.Fatalf("creating workspace manager: %v", err)
 	}
 
-	ag := agent.NewRunner(cfg.Agent, "")
 	broadcaster := NewBroadcaster()
-	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, broadcaster, "", cfg.MaxConcurrency)
+	orch := service.NewOrchestrator(wsMgr, issueRepo, cfg.Agent, cfg.Agent.APIKeys, broadcaster, "", cfg.MaxConcurrency)
 
 	h := NewHandler(issueRepo, nil, orch, cfg, broadcaster)
 	mux := http.NewServeMux()
@@ -201,6 +199,44 @@ func TestCreateIssue(t *testing.T) {
 				t.Error("expected non-empty id")
 			}
 		})
+	}
+}
+
+func TestCreateIssueWithAgentType(t *testing.T) {
+	_, mux := setupTestHandler(t)
+
+	// Valid agent_type
+	w := doRequest(t, mux, "POST", "/api/v1/issues", map[string]any{
+		"title":       "Test with codex",
+		"description": "Use codex agent",
+		"repo_path":   "/tmp/repo",
+		"agent_type":  "codex",
+		"agent_model":  "o3-mini",
+		"github_user": "testuser",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+	resp := decodeResponse(t, w)
+	if resp["agent_type"] != "codex" {
+		t.Errorf("agent_type = %v, want codex", resp["agent_type"])
+	}
+	if resp["agent_model"] != "o3-mini" {
+		t.Errorf("agent_model = %v, want o3-mini", resp["agent_model"])
+	}
+
+	// Invalid agent_type
+	w2 := doRequest(t, mux, "POST", "/api/v1/issues", map[string]any{
+		"title":       "Test with invalid",
+		"agent_type":  "invalid-provider",
+		"github_user": "testuser",
+	})
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w2.Code, w2.Body.String())
+	}
+	resp2 := decodeResponse(t, w2)
+	if resp2["error"] != "invalid_request" {
+		t.Errorf("error = %v, want invalid_request", resp2["error"])
 	}
 }
 

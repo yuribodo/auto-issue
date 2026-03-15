@@ -38,7 +38,7 @@ export default function History() {
       filtered = filtered.filter(
         (r) =>
           r.issue_title.toLowerCase().includes(q) ||
-          String(r.issue_number).includes(q)
+          String(r.run_number).includes(q)
       )
     }
     if (filterRepo) {
@@ -163,7 +163,7 @@ function RunRow({ run, onClick, formatDate }: { run: Run; onClick: () => void; f
       onMouseLeave={() => setHovered(false)}
     >
       <div style={styles.rowLeft}>
-        <span style={styles.rowIssue}>#{run.issue_number}</span>
+        <span style={styles.rowIssue}>#{run.run_number}</span>
         <span style={styles.rowTitle}>{run.issue_title}</span>
       </div>
       <div style={styles.rowRight}>

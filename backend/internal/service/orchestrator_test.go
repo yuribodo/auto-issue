@@ -48,14 +48,14 @@ func setupTestEnv(t *testing.T) (*Orchestrator, repository.IssueRepository, stri
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	// Agent runner with short timeout
-	runner := agent.NewRunner(config.AgentConfig{
+	// Agent config with short timeout
+	agentCfg := config.AgentConfig{
 		Type:    "claude-code",
 		Model:   "test-model",
 		Timeout: config.Duration{Duration: 30 * time.Second},
-	}, "")
+	}
 
-	orch := NewOrchestrator(ws, issueRepo, runner, &noopBroadcaster{}, "", 2)
+	orch := NewOrchestrator(ws, issueRepo, agentCfg, nil, &noopBroadcaster{}, "", 2)
 	return orch, issueRepo, repoDir
 }
 

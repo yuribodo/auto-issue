@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"auto-issue/internal/agent"
+	"auto-issue/internal/config"
 	"auto-issue/internal/constants"
 	"auto-issue/internal/models"
 	"auto-issue/internal/repository"
@@ -31,7 +32,8 @@ type IssueRequest struct {
 type Orchestrator struct {
 	workspace   *workspace.Manager
 	issues      repository.IssueRepository
-	agent       *agent.Runner
+	defaultCfg  config.AgentConfig
+	apiKeys     map[string]string
 	broadcaster EventBroadcaster
 	ghToken     string
 	queue       chan IssueRequest
@@ -42,12 +44,13 @@ type Orchestrator struct {
 }
 
 // NewOrchestrator creates an Orchestrator wired to the given dependencies.
-func NewOrchestrator(ws *workspace.Manager, issues repository.IssueRepository, ag *agent.Runner, broadcaster EventBroadcaster, ghToken string, maxConcurrency int) *Orchestrator {
+func NewOrchestrator(ws *workspace.Manager, issues repository.IssueRepository, defaultCfg config.AgentConfig, apiKeys map[string]string, broadcaster EventBroadcaster, ghToken string, maxConcurrency int) *Orchestrator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Orchestrator{
 		workspace:   ws,
 		issues:      issues,
-		agent:       ag,
+		defaultCfg:  defaultCfg,
+		apiKeys:     apiKeys,
 		broadcaster: broadcaster,
 		ghToken:     ghToken,
 		queue:       make(chan IssueRequest, 100),
@@ -115,6 +118,30 @@ func (o *Orchestrator) processIssue(issueID string) error {
 		return fmt.Errorf("issue %s is in phase %s, expected developing", issueID, issue.Phase)
 	}
 
+	// Resolve agent type and model (per-issue overrides global default)
+	agentType := issue.AgentType
+	if agentType == "" {
+		agentType = o.defaultCfg.Type
+	}
+	agentModel := issue.AgentModel
+	if agentModel == "" {
+		agentModel = o.defaultCfg.Model
+	}
+
+	provider, err := agent.NewProvider(agent.ProviderConfig{
+		Type:    agentType,
+		Model:   agentModel,
+		Timeout: o.defaultCfg.Timeout,
+		Prompt:  o.defaultCfg.Prompt,
+		GHToken: o.ghToken,
+		APIKeys: o.apiKeys,
+	})
+	if err != nil {
+		o.broadcastEvent(issueID, agent.EventError, "ERR", fmt.Sprintf("Provider error: %s", err))
+		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
+		return fmt.Errorf("creating provider: %w", err)
+	}
+
 	o.broadcastEvent(issueID, agent.EventStatus, "INFO", "Preparing workspace...")
 
 	// Step 1: Create or reuse workspace
@@ -145,7 +172,7 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "developing")
 	slog.Info("starting development", "issue", issueID, "iteration", issue.Iteration)
 
-	devResult, err := o.runAgentStreaming(issueID, wsPath, "developing", prompt)
+	devResult, err := o.runAgentStreaming(issueID, provider, wsPath, "developing", prompt)
 	if err != nil {
 		o.issues.UpdateOutput(o.ctx, issueID, devResult.Output, err.Error())
 		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
@@ -170,7 +197,7 @@ func (o *Orchestrator) processIssue(issueID string) error {
 
 	// Step 5: Run agent in code review mode with streaming
 	slog.Info("starting code review", "issue", issueID)
-	reviewResult, err := o.runAgentStreaming(issueID, wsPath, "code_reviewing", prompt)
+	reviewResult, err := o.runAgentStreaming(issueID, provider, wsPath, "code_reviewing", prompt)
 	if err != nil {
 		o.issues.UpdateOutput(o.ctx, issueID, reviewResult.Output, err.Error())
 		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
@@ -206,8 +233,8 @@ func (o *Orchestrator) processIssue(issueID string) error {
 }
 
 // runAgentStreaming runs the agent and broadcasts all events to SSE subscribers.
-func (o *Orchestrator) runAgentStreaming(issueID string, wsPath string, mode string, prompt string) (agent.RunResult, error) {
-	events, resultCh, err := o.agent.RunStreaming(o.ctx, wsPath, mode, prompt)
+func (o *Orchestrator) runAgentStreaming(issueID string, provider agent.ProviderRunner, wsPath string, mode string, prompt string) (agent.RunResult, error) {
+	events, resultCh, err := provider.RunStreaming(o.ctx, wsPath, mode, prompt)
 	if err != nil {
 		return agent.RunResult{}, err
 	}

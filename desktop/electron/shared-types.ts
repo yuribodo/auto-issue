@@ -36,6 +36,7 @@ export type Provider = 'openai' | 'anthropic' | 'gemini'
 
 export interface Run {
   id: string
+  run_number: number
   issue_number: number
   issue_title: string
   issue_body?: string

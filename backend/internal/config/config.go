@@ -16,11 +16,12 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Type          string   `json:"type"`
-	Model         string   `json:"model"`
-	Timeout       Duration `json:"timeout"`
-	MaxIterations int      `json:"max_iterations"`
-	Prompt        string   `json:"prompt"`
+	Type          string            `json:"type"`
+	Model         string            `json:"model"`
+	Timeout       Duration          `json:"timeout"`
+	MaxIterations int               `json:"max_iterations"`
+	Prompt        string            `json:"prompt"`
+	APIKeys       map[string]string `json:"api_keys,omitempty"`
 }
 
 type WorkspaceConfig struct {
@@ -74,6 +75,20 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Agent.MaxIterations == 0 {
 		c.Agent.MaxIterations = 3
+	}
+	if c.Agent.APIKeys == nil {
+		c.Agent.APIKeys = make(map[string]string)
+	}
+	// Read API keys from environment as fallback
+	if c.Agent.APIKeys["openai"] == "" {
+		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+			c.Agent.APIKeys["openai"] = key
+		}
+	}
+	if c.Agent.APIKeys["gemini"] == "" {
+		if key := os.Getenv("GOOGLE_API_KEY"); key != "" {
+			c.Agent.APIKeys["gemini"] = key
+		}
 	}
 	if c.Workspace.BasePath == "" {
 		home, _ := os.UserHomeDir()

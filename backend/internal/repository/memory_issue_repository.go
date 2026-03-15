@@ -12,8 +12,9 @@ import (
 
 // MemoryIssueRepository is an in-memory IssueRepository used for testing.
 type MemoryIssueRepository struct {
-	mu     sync.RWMutex
-	issues map[string]*models.Issue
+	mu        sync.RWMutex
+	issues    map[string]*models.Issue
+	runCounter int
 }
 
 // NewMemoryIssueRepository creates a new in-memory issue repository.
@@ -34,9 +35,11 @@ func (r *MemoryIssueRepository) Create(_ context.Context, id, title, description
 		return nil, fmt.Errorf("issue %q already exists", id)
 	}
 
+	r.runCounter++
 	issue := &models.Issue{
 		IssueID:     id,
-		GithubUser:  githubUser,
+		RunNumber:  r.runCounter,
+		GithubUser: githubUser,
 		Title:       title,
 		Description: description,
 		Phase:       constants.PhaseBacklog,
@@ -164,9 +167,11 @@ func (r *MemoryIssueRepository) CreateWithGithub(_ context.Context, id, title, d
 		return nil, fmt.Errorf("issue %q already exists", id)
 	}
 
+	r.runCounter++
 	issue := &models.Issue{
 		IssueID:     id,
-		GithubUser:  githubUser,
+		RunNumber:  r.runCounter,
+		GithubUser: githubUser,
 		Title:       title,
 		Description: description,
 		Phase:       constants.PhaseBacklog,
@@ -202,6 +207,31 @@ func (r *MemoryIssueRepository) UpdateCost(_ context.Context, id string, costUSD
 
 	issue.CostUSD = costUSD
 	issue.Turns = turns
+	return nil
+}
+
+func (r *MemoryIssueRepository) UpdateAgentInfo(_ context.Context, id string, agentType string, agentModel string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	issue, ok := r.issues[id]
+	if !ok {
+		return fmt.Errorf("issue %q not found", id)
+	}
+
+	issue.AgentType = agentType
+	issue.AgentModel = agentModel
+	return nil
+}
+
+func (r *MemoryIssueRepository) Delete(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.issues[id]; !ok {
+		return fmt.Errorf("issue %q not found", id)
+	}
+	delete(r.issues, id)
 	return nil
 }
 
