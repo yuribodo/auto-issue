@@ -23,20 +23,24 @@ function ensureDir(dir: string): void {
 export async function ensureClone(repo: string, token: string): Promise<string> {
   const [owner, name] = repo.split('/')
   const clonePath = path.join(reposDir, owner, name)
-  const url = `https://github.com/${repo}.git`
 
-  // Use extraHeader for auth so the token never leaks into .git/config
-  const authArgs = token
-    ? ['-c', `http.extraHeader=Authorization: Bearer ${token}`]
-    : []
+  // Use token in URL for auth (only in memory, not persisted in .git/config)
+  const url = token
+    ? `https://x-access-token:${token}@github.com/${repo}.git`
+    : `https://github.com/${repo}.git`
 
   if (fs.existsSync(path.join(clonePath, '.git'))) {
-    await execFileAsync('git', [...authArgs, 'fetch', '--all'], { cwd: clonePath })
+    // Set remote URL with token for fetch, then reset to clean URL after
+    await execFileAsync('git', ['remote', 'set-url', 'origin', url], { cwd: clonePath })
+    await execFileAsync('git', ['fetch', '--all'], { cwd: clonePath })
+    await execFileAsync('git', ['remote', 'set-url', 'origin', `https://github.com/${repo}.git`], { cwd: clonePath })
     return clonePath
   }
 
   ensureDir(path.dirname(clonePath))
-  await execFileAsync('git', [...authArgs, 'clone', url, clonePath])
+  await execFileAsync('git', ['clone', url, clonePath])
+  // Reset remote URL to clean version (no token)
+  await execFileAsync('git', ['remote', 'set-url', 'origin', `https://github.com/${repo}.git`], { cwd: clonePath })
   return clonePath
 }
 

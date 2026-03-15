@@ -1,11 +1,28 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
+
+// Load .env manually (dotenv may not work in bundled context)
+try {
+  const envPath = path.resolve(__dirname, '..', '.env')
+  const envContent = fs.readFileSync(envPath, 'utf-8')
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIdx = trimmed.indexOf('=')
+    if (eqIdx < 0) continue
+    const key = trimmed.slice(0, eqIdx).trim()
+    const value = trimmed.slice(eqIdx + 1).trim()
+    if (!process.env[key]) process.env[key] = value
+  }
+} catch { /* .env not found, rely on actual env vars */ }
 import {
-  registerDeepLinkProtocol,
   handleLogin,
   handleGetMe,
   handleLogout,
+  getAuthToken,
 } from './auth'
+import { getUserRepos, getRepoIssues, getIssueDetail } from './github'
 import { loadConfig, persistConfig, loadRuns, persistRuns } from './store'
 import {
   createRun,
@@ -43,6 +60,12 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+
+  // Force external links to open in the default browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -109,6 +132,30 @@ function registerIpcHandlers() {
     persistConfig(config)
   })
 
+  // --- Shell ---
+  ipcMain.handle('shell:open-external', (_event, url: string) => {
+    shell.openExternal(url)
+  })
+
+  // --- GitHub ---
+  ipcMain.handle('github:repos', async (_event, page?: number) => {
+    const token = getAuthToken()
+    if (!token) throw new Error('Not authenticated')
+    return getUserRepos(token, page)
+  })
+
+  ipcMain.handle('github:issues', async (_event, owner: string, repo: string, page?: number) => {
+    const token = getAuthToken()
+    if (!token) throw new Error('Not authenticated')
+    return getRepoIssues(token, owner, repo, page)
+  })
+
+  ipcMain.handle('github:issue-detail', async (_event, owner: string, repo: string, num: number) => {
+    const token = getAuthToken()
+    if (!token) throw new Error('Not authenticated')
+    return getIssueDetail(token, owner, repo, num)
+  })
+
   // --- Auth ---
   ipcMain.handle('auth:me', () => {
     return handleGetMe()
@@ -122,8 +169,6 @@ function registerIpcHandlers() {
     handleLogout()
   })
 }
-
-registerDeepLinkProtocol()
 
 app.whenReady().then(() => {
   setBroadcast(broadcastEvent)

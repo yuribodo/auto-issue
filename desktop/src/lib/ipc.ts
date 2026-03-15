@@ -1,4 +1,4 @@
-import type { Run, User, SSEEvent, SettingsData, CreateRunParams, Provider } from './types'
+import type { Run, User, SSEEvent, SettingsData, CreateRunParams, Provider, GitHubRepo, GitHubIssue } from './types'
 
 export async function getRuns(): Promise<Run[]> {
   return window.electronAPI.invoke('runs:list') as Promise<Run[]>
@@ -40,6 +40,18 @@ export async function saveConfig(config: SettingsData): Promise<void> {
   await window.electronAPI.invoke('config:save', config)
 }
 
-export async function getMe(): Promise<User> {
-  return window.electronAPI.invoke('auth:me') as Promise<User>
+export async function getMe(): Promise<User | null> {
+  return window.electronAPI.invoke('auth:me') as Promise<User | null>
+}
+
+export async function getGitHubRepos(page?: number) {
+  return window.electronAPI.invoke('github:repos', page) as Promise<GitHubRepo[]>
+}
+
+export async function getGitHubIssues(owner: string, repo: string, page?: number) {
+  return window.electronAPI.invoke('github:issues', owner, repo, page) as Promise<GitHubIssue[]>
+}
+
+export async function getGitHubIssueDetail(owner: string, repo: string, num: number) {
+  return window.electronAPI.invoke('github:issue-detail', owner, repo, num) as Promise<GitHubIssue>
 }

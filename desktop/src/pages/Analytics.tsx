@@ -1,21 +1,100 @@
-import { useState } from 'react'
-import { MOCK_DAILY_STATS_7D, MOCK_DAILY_STATS_30D, MOCK_PROVIDER_STATS, MOCK_REPO_STATS } from '../lib/mocks'
-import type { DailyStats } from '../lib/types'
+import { useState, useEffect, useMemo } from 'react'
+import { getRuns } from '../lib/ipc'
+import type { Run, DailyStats, ProviderStats, RepoStats } from '../lib/types'
 
 export default function Analytics() {
   const [range, setRange] = useState<'7d' | '30d'>('7d')
-  const dailyStats = range === '7d' ? MOCK_DAILY_STATS_7D : MOCK_DAILY_STATS_30D
+  const [runs, setRuns] = useState<Run[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getRuns().then((r) => {
+      setRuns(r)
+      setLoading(false)
+    }).catch(() => setLoading(false))
+  }, [])
+
+  const days = range === '7d' ? 7 : 30
+  const cutoff = Date.now() - days * 86400_000
+
+  const filteredRuns = useMemo(
+    () => runs.filter((r) => new Date(r.started_at).getTime() >= cutoff),
+    [runs, cutoff],
+  )
+
+  const dailyStats = useMemo(() => {
+    const byDay: Record<string, DailyStats> = {}
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(Date.now() - i * 86400_000).toISOString().split('T')[0]
+      byDay[date] = { date, total: 0, success: 0, failed: 0 }
+    }
+    for (const r of filteredRuns) {
+      const date = r.started_at.split('T')[0]
+      if (byDay[date]) {
+        byDay[date].total++
+        if (r.status === 'done') byDay[date].success++
+        if (r.status === 'failed') byDay[date].failed++
+      }
+    }
+    return Object.values(byDay)
+  }, [filteredRuns, days])
+
+  const providerStats = useMemo(() => {
+    const map: Record<string, { runs: number; cost: number; totalTime: number }> = {}
+    for (const r of filteredRuns) {
+      if (!map[r.provider]) map[r.provider] = { runs: 0, cost: 0, totalTime: 0 }
+      map[r.provider].runs++
+      map[r.provider].cost += r.cost_usd ?? 0
+      if (r.started_at && r.finished_at) {
+        const ms = new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()
+        map[r.provider].totalTime += ms / 60_000
+      }
+    }
+    return Object.entries(map).map(([provider, d]): ProviderStats => ({
+      provider: provider as Run['provider'],
+      runs: d.runs,
+      cost_usd: d.cost,
+      avg_time_min: d.runs > 0 ? d.totalTime / d.runs : 0,
+    }))
+  }, [filteredRuns])
+
+  const repoStats = useMemo(() => {
+    const map: Record<string, { runs: number; success: number }> = {}
+    for (const r of filteredRuns) {
+      if (!map[r.repo]) map[r.repo] = { runs: 0, success: 0 }
+      map[r.repo].runs++
+      if (r.status === 'done') map[r.repo].success++
+    }
+    return Object.entries(map).map(([repo, d]): RepoStats => ({
+      repo,
+      runs: d.runs,
+      success_rate: d.runs > 0 ? d.success / d.runs : 0,
+    }))
+  }, [filteredRuns])
 
   const totalRuns = dailyStats.reduce((s, d) => s + d.total, 0)
   const totalSuccess = dailyStats.reduce((s, d) => s + d.success, 0)
   const totalFailed = dailyStats.reduce((s, d) => s + d.failed, 0)
   const successRate = totalRuns > 0 ? Math.round((totalSuccess / totalRuns) * 100) : 0
 
-  const totalCost = MOCK_PROVIDER_STATS.reduce((s, p) => s + p.cost_usd, 0)
-  const avgTime = MOCK_PROVIDER_STATS.reduce((s, p) => s + p.avg_time_min * p.runs, 0) /
-    MOCK_PROVIDER_STATS.reduce((s, p) => s + p.runs, 0)
+  const totalCost = providerStats.reduce((s, p) => s + p.cost_usd, 0)
+  const totalWeightedTime = providerStats.reduce((s, p) => s + p.avg_time_min * p.runs, 0)
+  const totalProviderRuns = providerStats.reduce((s, p) => s + p.runs, 0)
+  const avgTime = totalProviderRuns > 0 ? totalWeightedTime / totalProviderRuns : 0
 
   const maxDaily = Math.max(...dailyStats.map((d) => d.total), 1)
+
+  if (loading) {
+    return (
+      <div style={styles.page}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--fg-muted)', padding: '48px 0', textAlign: 'center' as const }}>
+          Loading analytics...
+        </div>
+      </div>
+    )
+  }
+
+  const isEmpty = runs.length === 0
 
   return (
     <div style={styles.page}>
@@ -47,120 +126,132 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div style={styles.summaryGrid}>
-        <MetricCard label="TOTAL RUNS" value={String(totalRuns)} />
-        <MetricCard label="SUCCESS RATE" value={`${successRate}%`} color={successRate >= 80 ? 'var(--accent)' : 'var(--amber)'} />
-        <MetricCard label="AVG RESOLUTION" value={`${avgTime.toFixed(1)}m`} />
-        <MetricCard label="TOTAL COST" value={`$${totalCost.toFixed(2)}`} />
-      </div>
+      {isEmpty ? (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--fg-muted)', padding: '48px 0', textAlign: 'center' as const }}>
+          No runs yet. Create your first run to see analytics here.
+        </div>
+      ) : (
+        <>
+          {/* Summary Cards */}
+          <div style={styles.summaryGrid}>
+            <MetricCard label="TOTAL RUNS" value={String(totalRuns)} />
+            <MetricCard label="SUCCESS RATE" value={`${successRate}%`} color={successRate >= 80 ? 'var(--accent)' : 'var(--amber)'} />
+            <MetricCard label="AVG RESOLUTION" value={`${avgTime.toFixed(1)}m`} />
+            <MetricCard label="TOTAL COST" value={`$${totalCost.toFixed(2)}`} />
+          </div>
 
-      {/* Bar Chart */}
-      <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>RUNS PER DAY</h2>
-        <div style={styles.chart}>
-          {dailyStats.map((d, i) => (
-            <div key={i} style={styles.barGroup}>
-              <div style={styles.barContainer}>
-                <div
-                  style={{
-                    ...styles.barFailed,
-                    height: `${(d.failed / maxDaily) * 100}%`,
-                  }}
-                />
-                <div
-                  style={{
-                    ...styles.barSuccess,
-                    height: `${(d.success / maxDaily) * 100}%`,
-                  }}
-                />
-              </div>
-              <span style={styles.barLabel}>
-                {formatDateLabel(d.date, range === '30d')}
+          {/* Bar Chart */}
+          <div style={styles.section}>
+            <h2 style={styles.sectionTitle}>RUNS PER DAY</h2>
+            <div style={styles.chart}>
+              {dailyStats.map((d, i) => (
+                <div key={i} style={styles.barGroup}>
+                  <div style={styles.barContainer}>
+                    <div
+                      style={{
+                        ...styles.barFailed,
+                        height: `${(d.failed / maxDaily) * 100}%`,
+                      }}
+                    />
+                    <div
+                      style={{
+                        ...styles.barSuccess,
+                        height: `${(d.success / maxDaily) * 100}%`,
+                      }}
+                    />
+                  </div>
+                  <span style={styles.barLabel}>
+                    {formatDateLabel(d.date, range === '30d')}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={styles.legend}>
+              <span style={styles.legendItem}>
+                <span style={{ ...styles.legendDot, background: 'var(--accent)' }} /> Success
+              </span>
+              <span style={styles.legendItem}>
+                <span style={{ ...styles.legendDot, background: 'var(--red)' }} /> Failed
               </span>
             </div>
-          ))}
-        </div>
-        <div style={styles.legend}>
-          <span style={styles.legendItem}>
-            <span style={{ ...styles.legendDot, background: 'var(--accent)' }} /> Success
-          </span>
-          <span style={styles.legendItem}>
-            <span style={{ ...styles.legendDot, background: 'var(--red)' }} /> Failed
-          </span>
-        </div>
-      </div>
-
-      {/* Success Rate Gauge */}
-      <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>SUCCESS RATE</h2>
-        <div style={styles.gaugeRow}>
-          <div style={styles.gauge}>
-            <div style={styles.gaugeTrack}>
-              <div
-                style={{
-                  ...styles.gaugeFill,
-                  width: `${successRate}%`,
-                  background: successRate >= 80 ? 'var(--accent)' : successRate >= 60 ? 'var(--amber)' : 'var(--red)',
-                }}
-              />
-            </div>
-            <span style={styles.gaugeValue}>{successRate}%</span>
           </div>
-          <div style={styles.gaugeStats}>
-            <span style={{ ...styles.gaugeStat, color: 'var(--accent)' }}>{totalSuccess} passed</span>
-            <span style={{ ...styles.gaugeStat, color: 'var(--red)' }}>{totalFailed} failed</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Provider Stats */}
-      <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>COST BY PROVIDER</h2>
-        <div style={styles.table}>
-          <div style={styles.tableHeader}>
-            <span style={{ ...styles.tableCell, flex: 2 }}>PROVIDER</span>
-            <span style={styles.tableCell}>RUNS</span>
-            <span style={styles.tableCell}>COST</span>
-            <span style={styles.tableCell}>AVG TIME</span>
-          </div>
-          {MOCK_PROVIDER_STATS.map((p) => (
-            <div key={p.provider} style={styles.tableRow}>
-              <span style={{ ...styles.tableCellValue, flex: 2 }}>
-                {p.provider.toUpperCase()}
-              </span>
-              <span style={styles.tableCellValue}>{p.runs}</span>
-              <span style={styles.tableCellValue}>${p.cost_usd.toFixed(2)}</span>
-              <span style={styles.tableCellValue}>{p.avg_time_min.toFixed(1)}m</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Repo Stats */}
-      <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>RUNS BY REPOSITORY</h2>
-        <div style={styles.repoList}>
-          {MOCK_REPO_STATS.map((r) => (
-            <div key={r.repo} style={styles.repoItem}>
-              <div style={styles.repoTop}>
-                <span style={styles.repoName}>{r.repo}</span>
-                <span style={styles.repoRuns}>{r.runs} runs</span>
+          {/* Success Rate Gauge */}
+          <div style={styles.section}>
+            <h2 style={styles.sectionTitle}>SUCCESS RATE</h2>
+            <div style={styles.gaugeRow}>
+              <div style={styles.gauge}>
+                <div style={styles.gaugeTrack}>
+                  <div
+                    style={{
+                      ...styles.gaugeFill,
+                      width: `${successRate}%`,
+                      background: successRate >= 80 ? 'var(--accent)' : successRate >= 60 ? 'var(--amber)' : 'var(--red)',
+                    }}
+                  />
+                </div>
+                <span style={styles.gaugeValue}>{successRate}%</span>
               </div>
-              <div style={styles.repoBar}>
-                <div
-                  style={{
-                    ...styles.repoBarFill,
-                    width: `${r.success_rate * 100}%`,
-                    background: r.success_rate >= 0.8 ? 'var(--accent)' : 'var(--amber)',
-                  }}
-                />
+              <div style={styles.gaugeStats}>
+                <span style={{ ...styles.gaugeStat, color: 'var(--accent)' }}>{totalSuccess} passed</span>
+                <span style={{ ...styles.gaugeStat, color: 'var(--red)' }}>{totalFailed} failed</span>
               </div>
-              <span style={styles.repoRate}>{Math.round(r.success_rate * 100)}% success</span>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+
+          {/* Provider Stats */}
+          {providerStats.length > 0 && (
+            <div style={styles.section}>
+              <h2 style={styles.sectionTitle}>COST BY PROVIDER</h2>
+              <div style={styles.table}>
+                <div style={styles.tableHeader}>
+                  <span style={{ ...styles.tableCell, flex: 2 }}>PROVIDER</span>
+                  <span style={styles.tableCell}>RUNS</span>
+                  <span style={styles.tableCell}>COST</span>
+                  <span style={styles.tableCell}>AVG TIME</span>
+                </div>
+                {providerStats.map((p) => (
+                  <div key={p.provider} style={styles.tableRow}>
+                    <span style={{ ...styles.tableCellValue, flex: 2 }}>
+                      {p.provider.toUpperCase()}
+                    </span>
+                    <span style={styles.tableCellValue}>{p.runs}</span>
+                    <span style={styles.tableCellValue}>${p.cost_usd.toFixed(2)}</span>
+                    <span style={styles.tableCellValue}>{p.avg_time_min.toFixed(1)}m</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Repo Stats */}
+          {repoStats.length > 0 && (
+            <div style={styles.section}>
+              <h2 style={styles.sectionTitle}>RUNS BY REPOSITORY</h2>
+              <div style={styles.repoList}>
+                {repoStats.map((r) => (
+                  <div key={r.repo} style={styles.repoItem}>
+                    <div style={styles.repoTop}>
+                      <span style={styles.repoName}>{r.repo}</span>
+                      <span style={styles.repoRuns}>{r.runs} runs</span>
+                    </div>
+                    <div style={styles.repoBar}>
+                      <div
+                        style={{
+                          ...styles.repoBarFill,
+                          width: `${r.success_rate * 100}%`,
+                          background: r.success_rate >= 0.8 ? 'var(--accent)' : 'var(--amber)',
+                        }}
+                      />
+                    </div>
+                    <span style={styles.repoRate}>{Math.round(r.success_rate * 100)}% success</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

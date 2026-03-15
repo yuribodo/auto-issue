@@ -1,15 +1,83 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Notification } from '../lib/types'
-import { MOCK_NOTIFICATIONS } from '../lib/mocks'
+
+const STORAGE_KEY = 'auto-issue-notifications'
+
+function loadNotifications(): Notification[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as Notification[]) : []
+  } catch {
+    return []
+  }
+}
+
+function saveNotifications(notifs: Notification[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(notifs.slice(0, 50)))
+}
 
 export default function NotificationBell() {
-  const [notifications, setNotifications] = useState<Notification[]>(MOCK_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState<Notification[]>(loadNotifications)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
   const unreadCount = notifications.filter((n) => !n.read).length
+
+  const addNotification = useCallback((notif: Notification) => {
+    setNotifications((prev) => {
+      const updated = [notif, ...prev]
+      saveNotifications(updated)
+      return updated
+    })
+  }, [])
+
+  // Listen for run events
+  useEffect(() => {
+    const unsub = window.electronAPI.on('run:event', (...args: unknown[]) => {
+      const data = args[0] as { runId: string; event: { type: string; prefix: string; content: string } }
+      if (!data?.event || data.event.type !== 'status') return
+
+      const { runId, event } = data
+
+      if (event.content.includes('PR detected')) {
+        addNotification({
+          id: `notif-${Date.now()}`,
+          type: 'pr_opened',
+          run_id: runId,
+          repo: '',
+          issue_number: 0,
+          message: event.content,
+          timestamp: new Date().toISOString(),
+          read: false,
+        })
+      } else if (event.prefix === 'FAIL') {
+        addNotification({
+          id: `notif-${Date.now()}`,
+          type: 'run_failed',
+          run_id: runId,
+          repo: '',
+          issue_number: 0,
+          message: `Run failed: ${event.content}`,
+          timestamp: new Date().toISOString(),
+          read: false,
+        })
+      } else if (event.content.includes('awaiting_approval')) {
+        addNotification({
+          id: `notif-${Date.now()}`,
+          type: 'approval_needed',
+          run_id: runId,
+          repo: '',
+          issue_number: 0,
+          message: 'Run needs your approval',
+          timestamp: new Date().toISOString(),
+          read: false,
+        })
+      }
+    })
+    return unsub
+  }, [addNotification])
 
   useEffect(() => {
     if (!open) return
@@ -23,15 +91,21 @@ export default function NotificationBell() {
   }, [open])
 
   const handleNotifClick = (notif: Notification) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n))
-    )
+    setNotifications((prev) => {
+      const updated = prev.map((n) => (n.id === notif.id ? { ...n, read: true } : n))
+      saveNotifications(updated)
+      return updated
+    })
     setOpen(false)
     navigate(`/run/${notif.run_id}`)
   }
 
   const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, read: true }))
+      saveNotifications(updated)
+      return updated
+    })
   }
 
   const formatTime = (timestamp: string) => {
