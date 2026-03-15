@@ -2,6 +2,12 @@
   "name": "auto-issue-desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Desktop app for Auto Issue – autonomous GitHub issue agent",
+  "author": {
+    "name": "yuribodo",
+    "email": "yuribodo@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/yuribodo/auto-issue",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
