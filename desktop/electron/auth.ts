@@ -1,19 +1,17 @@
 import { app, shell, safeStorage, BrowserWindow } from 'electron'
-import http from 'node:http'
-import crypto from 'node:crypto'
 import path from 'node:path'
 import fs from 'node:fs'
 import { getAuthenticatedUser } from './github'
 import type { GitHubUser } from './shared-types'
 
-const OAUTH_PORT = 17249
-const OAUTH_SCOPES = 'repo'
+const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? 'Ov23li5OrfDADZHMPhfM'
 
 const userData = app.getPath('userData')
 const authFilePath = path.join(userData, 'auth.enc')
 
 let cachedToken: string | null = null
 let cachedUser: GitHubUser | null = null
+let pollingAbort: AbortController | null = null
 
 function saveToken(token: string): void {
   const encrypted = safeStorage.encryptString(token)
@@ -37,91 +35,113 @@ export function getAuthToken(): string | null {
   return cachedToken
 }
 
+/**
+ * GitHub Device Flow login.
+ * Opens the browser for the user to enter a code — no client_secret needed.
+ * https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow
+ */
 export function handleLogin(mainWindow: BrowserWindow | null): void {
-  const clientId = process.env.GITHUB_CLIENT_ID ?? ''
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET ?? ''
-
-  if (!clientId || !clientSecret) {
-    console.error('[auth] clientId or GITHUB_CLIENT_SECRET not set')
+  if (!GITHUB_CLIENT_ID) {
+    console.error('[auth] GITHUB_CLIENT_ID not set')
     return
   }
 
-  const state = crypto.randomBytes(16).toString('hex')
+  // Cancel any previous polling
+  pollingAbort?.abort()
+  pollingAbort = new AbortController()
+  const { signal } = pollingAbort
 
-  const server = http.createServer(async (req, res) => {
-    if (!req.url?.startsWith('/oauth/callback')) {
-      res.writeHead(404)
-      res.end('Not found')
-      return
-    }
-
-    const url = new URL(req.url, `http://localhost:${OAUTH_PORT}`)
-    const code = url.searchParams.get('code')
-    const returnedState = url.searchParams.get('state')
-
-    if (returnedState !== state || !code) {
-      res.writeHead(400)
-      res.end('Invalid state or missing code')
-      return
-    }
-
+  ;(async () => {
     try {
-      // Exchange code for token
-      const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      // Step 1: Request device and user codes
+      const codeRes = await fetch('https://github.com/login/device/code', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          client_id: clientId,
-          client_secret: clientSecret,
-          code,
-        }),
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: 'repo' }),
+        signal,
       })
 
-      const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string }
-
-      if (!tokenData.access_token) {
-        throw new Error(tokenData.error ?? 'Failed to obtain access token')
+      const codeData = (await codeRes.json()) as {
+        device_code: string
+        user_code: string
+        verification_uri: string
+        expires_in: number
+        interval: number
       }
 
-      const token = tokenData.access_token
+      console.log(`[auth] Device code: ${codeData.user_code}`)
 
-      // Save encrypted token
-      saveToken(token)
-      cachedToken = token
+      // Notify renderer to show the user code
+      mainWindow?.webContents.send('auth:device-code', {
+        userCode: codeData.user_code,
+        verificationUri: codeData.verification_uri,
+      })
 
-      // Get user info
-      const user = await getAuthenticatedUser(token)
-      cachedUser = user
+      // Open browser for user to enter code
+      shell.openExternal(`${codeData.verification_uri}`)
 
-      // Send success response to browser
-      res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end('<html><body style="background:#0a0a0a;color:#fff;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div><h2>Authentication successful!</h2><p>You can close this window and return to auto-issue.</p></div></body></html>')
+      // Step 2: Poll for token
+      const intervalMs = (codeData.interval || 5) * 1000
+      const expiresAt = Date.now() + codeData.expires_in * 1000
 
-      // Notify renderer
-      mainWindow?.webContents.send('auth:success', user)
+      while (Date.now() < expiresAt) {
+        if (signal.aborted) return
+
+        await new Promise((r) => setTimeout(r, intervalMs))
+        if (signal.aborted) return
+
+        const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            client_id: GITHUB_CLIENT_ID,
+            device_code: codeData.device_code,
+            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          }),
+          signal,
+        })
+
+        const tokenData = (await tokenRes.json()) as {
+          access_token?: string
+          error?: string
+        }
+
+        if (tokenData.access_token) {
+          saveToken(tokenData.access_token)
+          cachedToken = tokenData.access_token
+
+          const user = await getAuthenticatedUser(tokenData.access_token)
+          cachedUser = user
+
+          mainWindow?.webContents.send('auth:success', user)
+          console.log(`[auth] Logged in as ${user.login}`)
+          return
+        }
+
+        if (tokenData.error === 'authorization_pending') {
+          continue
+        }
+
+        if (tokenData.error === 'slow_down') {
+          await new Promise((r) => setTimeout(r, 5000))
+          continue
+        }
+
+        // expired_token, access_denied, etc.
+        console.error('[auth] Device flow error:', tokenData.error)
+        mainWindow?.webContents.send('auth:error', tokenData.error)
+        return
+      }
+
+      console.error('[auth] Device code expired')
+      mainWindow?.webContents.send('auth:error', 'Code expired — please try again')
     } catch (err) {
+      if (signal.aborted) return
       const msg = err instanceof Error ? err.message : String(err)
-      console.error('[auth] OAuth token exchange failed:', msg)
-      res.writeHead(500)
-      res.end(`Authentication failed: ${msg}`)
-    } finally {
-      // Close server after handling
-      server.close()
+      console.error('[auth] Device flow failed:', msg)
+      mainWindow?.webContents.send('auth:error', msg)
     }
-  })
-
-  server.listen(OAUTH_PORT, () => {
-    const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(`http://localhost:${OAUTH_PORT}/oauth/callback`)}&scope=${OAUTH_SCOPES}&state=${state}`
-    shell.openExternal(authUrl)
-  })
-
-  // Timeout: close server after 5 minutes if no callback received
-  setTimeout(() => {
-    server.close()
-  }, 5 * 60_000)
+  })()
 }
 
 export async function handleGetMe(): Promise<GitHubUser | null> {
@@ -143,6 +163,7 @@ export async function handleGetMe(): Promise<GitHubUser | null> {
 }
 
 export function handleLogout(): void {
+  pollingAbort?.abort()
   cachedToken = null
   cachedUser = null
   try { fs.unlinkSync(authFilePath) } catch { /* ignore */ }

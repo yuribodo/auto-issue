@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -34,10 +36,31 @@ func (p *claudeProvider) RunStreaming(ctx context.Context, workspacePath, mode, 
 
 	env := baseEnv(p.cfg.GHToken)
 
-	ptmx, cmd, err := spawnWithPTY(ctx, "claude", args, workspacePath, env)
-	if err != nil {
-		cancel()
-		return nil, nil, err
+	// Try PTY first; fall back to direct spawn (e.g. on Windows).
+	var reader io.ReadCloser
+	var cmd *exec.Cmd
+
+	ptmx, ptCmd, ptErr := spawnWithPTY(ctx, "claude", args, workspacePath, env)
+	if ptErr == nil {
+		reader = ptmx
+		cmd = ptCmd
+	} else {
+		directCmd, dirErr := spawnDirect(ctx, "claude", args, workspacePath, env)
+		if dirErr != nil {
+			cancel()
+			return nil, nil, dirErr
+		}
+		stdout, pipeErr := directCmd.StdoutPipe()
+		if pipeErr != nil {
+			cancel()
+			return nil, nil, fmt.Errorf("creating stdout pipe: %w", pipeErr)
+		}
+		if startErr := directCmd.Start(); startErr != nil {
+			cancel()
+			return nil, nil, fmt.Errorf("starting agent: %w", startErr)
+		}
+		reader = stdout
+		cmd = directCmd
 	}
 
 	eventCh := make(chan AgentEvent, 256)
@@ -47,13 +70,13 @@ func (p *claudeProvider) RunStreaming(ctx context.Context, workspacePath, mode, 
 		defer cancel()
 		defer close(eventCh)
 		defer close(resultCh)
-		defer ptmx.Close()
+		defer reader.Close()
 
 		start := time.Now()
 		result := RunResult{}
 		tb := newTextBufferer(ctx, eventCh)
 
-		scanner := bufio.NewScanner(ptmx)
+		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 		for scanner.Scan() {

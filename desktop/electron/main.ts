@@ -42,8 +42,11 @@ import {
   backendSubscribeSSE,
   backendHealthCheck,
   backendGetDiff,
+  setBackendUrl,
+  setAuthTokenGetter,
   type SSEConnection,
 } from './backend-client'
+import { spawnDaemon, killDaemon } from './daemon'
 import type { SSEEvent, SettingsData, CreateRunParams, Provider } from './shared-types'
 
 let mainWindow: BrowserWindow | null = null
@@ -233,13 +236,24 @@ function registerIpcHandlers() {
 
     await backendApproveRun(id)
     unsubscribeFromRunEvents(id)
-    // Update local cache
-    const runs = loadRuns()
-    const run = runs.find((r) => r.id === id)
-    if (run) {
-      run.status = 'done'
-      run.finished_at = new Date().toISOString()
-      persistRuns(runs)
+    // Refetch from backend to get full data (pr_url, cost, etc.)
+    try {
+      const fresh = await backendGetRun(id)
+      if (fresh) {
+        const runs = loadRuns()
+        const idx = runs.findIndex((r) => r.id === id)
+        if (idx >= 0) runs[idx] = fresh
+        persistRuns(runs)
+      }
+    } catch {
+      // Fallback: update cache minimally
+      const runs = loadRuns()
+      const run = runs.find((r) => r.id === id)
+      if (run) {
+        run.status = 'done'
+        run.finished_at = new Date().toISOString()
+        persistRuns(runs)
+      }
     }
   })
 
@@ -256,12 +270,22 @@ function registerIpcHandlers() {
       return
     }
     await backendSubmitFeedback(id, feedback || 'Rejected by user — please fix the issues and try again.')
-    // Update local cache
-    const runs = loadRuns()
-    const run = runs.find((r) => r.id === id)
-    if (run) {
-      run.status = 'running'
-      persistRuns(runs)
+    // Refetch from backend to get full data
+    try {
+      const fresh = await backendGetRun(id)
+      if (fresh) {
+        const runs = loadRuns()
+        const idx = runs.findIndex((r) => r.id === id)
+        if (idx >= 0) runs[idx] = fresh
+        persistRuns(runs)
+      }
+    } catch {
+      const runs = loadRuns()
+      const run = runs.find((r) => r.id === id)
+      if (run) {
+        run.status = 'running'
+        persistRuns(runs)
+      }
     }
     // Re-subscribe to SSE since the agent will restart
     subscribeToRunEvents(id)
@@ -352,11 +376,12 @@ function registerIpcHandlers() {
 
 app.whenReady().then(async () => {
   setBroadcast(broadcastEvent)
+  setAuthTokenGetter(getAuthToken)
 
   // Check if backend is available
   useBackend = await backendHealthCheck()
   if (useBackend) {
-    console.log('[main] Backend detected at', process.env.BACKEND_URL || 'http://localhost:8080')
+    console.log('[main] Backend detected at', process.env.BACKEND_URL)
     console.log('[main] Using backend for run management')
 
     // Subscribe to SSE for any currently running issues
@@ -373,7 +398,36 @@ app.whenReady().then(async () => {
     } catch (err) {
       console.error('[main] Failed to list running issues:', err)
     }
-  } else {
+  }
+
+  // Dev/self-hosted: spawn bundled backend if DATABASE_URL env var is set
+  if (!useBackend && process.env.DATABASE_URL) {
+    try {
+      const port = await spawnDaemon(process.env.DATABASE_URL)
+      if (port > 0) {
+        setBackendUrl(`http://127.0.0.1:${port}`)
+        useBackend = true
+        console.log(`[main] Bundled backend started on port ${port}`)
+
+        try {
+          const user = await handleGetMe()
+          const runs = await backendListRuns(user?.login)
+          persistRuns(runs)
+          for (const run of runs) {
+            if (run.status === 'running') {
+              subscribeToRunEvents(run.id)
+            }
+          }
+        } catch (err) {
+          console.error('[main] Failed to list running issues:', err)
+        }
+      }
+    } catch (err) {
+      console.error('[main] Failed to start bundled backend:', err)
+    }
+  }
+
+  if (!useBackend) {
     console.log('[main] Backend not available, using local runner')
     const { recoverRuns } = await import('./runner')
     recoverRuns()
@@ -425,4 +479,5 @@ app.on('quit', () => {
   }
   sseSubscriptions.clear()
   killAll()
+  killDaemon()
 })

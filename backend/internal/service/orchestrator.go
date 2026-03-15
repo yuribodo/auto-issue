@@ -25,6 +25,7 @@ type EventBroadcaster interface {
 // IssueRequest represents an issue enqueued for processing.
 type IssueRequest struct {
 	IssueID string
+	GHToken string // per-request GitHub token from the user's OAuth session
 }
 
 // Orchestrator coordinates the issue lifecycle by dispatching work
@@ -69,8 +70,9 @@ func (o *Orchestrator) Start() {
 }
 
 // Enqueue adds an issue to the work queue.
-func (o *Orchestrator) Enqueue(issueID string) {
-	o.queue <- IssueRequest{IssueID: issueID}
+// ghToken is the user's GitHub OAuth token; if empty, falls back to the server-wide token.
+func (o *Orchestrator) Enqueue(issueID string, ghToken string) {
+	o.queue <- IssueRequest{IssueID: issueID, GHToken: ghToken}
 }
 
 // CancelIssue cancels a running issue's agent process and transitions it to failed.
@@ -105,7 +107,7 @@ func (o *Orchestrator) consumeLoop() {
 			defer o.wg.Done()
 			defer func() { <-o.sem }() // release semaphore
 
-			if err := o.processIssue(r.IssueID); err != nil {
+			if err := o.processIssue(r.IssueID, r.GHToken); err != nil {
 				slog.Error("processing issue failed", "issue", r.IssueID, "error", err)
 			}
 		}(req)
@@ -123,7 +125,12 @@ func (o *Orchestrator) broadcastEvent(issueID string, eventType agent.AgentEvent
 	}
 }
 
-func (o *Orchestrator) processIssue(issueID string) error {
+func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
+	// Fall back to server-wide token if no per-request token provided
+	if ghToken == "" {
+		ghToken = o.ghToken
+	}
+
 	// Create per-issue context for cancellation
 	issueCtx, issueCancel := context.WithCancel(o.ctx)
 	defer issueCancel()
@@ -161,7 +168,7 @@ func (o *Orchestrator) processIssue(issueID string) error {
 		Model:   agentModel,
 		Timeout: o.defaultCfg.Timeout,
 		Prompt:  o.defaultCfg.Prompt,
-		GHToken: o.ghToken,
+		GHToken: ghToken,
 		APIKeys: o.apiKeys,
 	})
 	if err != nil {
@@ -176,7 +183,7 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	var wsPath string
 	if issue.GithubRepo != "" {
 		// Remote GitHub repo — use worktree from cached clone
-		wsPath, err = o.workspace.CreateFromRemote(issueID, issue.GithubRepo, o.ghToken)
+		wsPath, err = o.workspace.CreateFromRemote(issueID, issue.GithubRepo, ghToken)
 	} else {
 		// Local repo — use worktree from local path
 		wsPath, err = o.workspace.Create(issueID, issue.RepoPath)

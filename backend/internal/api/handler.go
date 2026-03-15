@@ -31,6 +31,7 @@ type Handler struct {
 }
 
 // NewHandler creates a Handler wired to the given dependencies.
+// orch and broadcaster may be nil for API-only deployments (no agent execution).
 func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigRepository, orch *service.Orchestrator, cfg *config.Config, broadcaster *Broadcaster) *Handler {
 	return &Handler{
 		issues:      issues,
@@ -228,6 +229,10 @@ func (h *Handler) cancelIssue(w http.ResponseWriter, r *http.Request, id string)
 	}
 
 	// Cancel the agent process
+	if h.orch == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "agent execution is not available on this server")
+		return
+	}
 	h.orch.CancelIssue(id)
 
 	// Transition to failed
@@ -276,7 +281,11 @@ func (h *Handler) moveIssue(w http.ResponseWriter, r *http.Request, id string) {
 			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
 			return
 		}
-		h.orch.Enqueue(id)
+		if h.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "agent execution is not available on this server")
+			return
+		}
+		h.orch.Enqueue(id, extractGHToken(r))
 
 		issue, err := h.issues.Get(ctx, id)
 		if err != nil {
@@ -347,8 +356,8 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	if issue.Phase == constants.PhaseDeveloping {
-		h.orch.Enqueue(issue.IssueID)
+	if issue.Phase == constants.PhaseDeveloping && h.orch != nil {
+		h.orch.Enqueue(issue.IssueID, extractGHToken(r))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -370,6 +379,10 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
+	if h.broadcaster == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "event streaming is not available on this server")
+		return
+	}
 	h.broadcaster.ServeSSE(w, r, id)
 }
 
@@ -537,6 +550,20 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 	}); err != nil {
 		http.Error(w, fmt.Errorf("encoding error response: %w", err).Error(), http.StatusInternalServerError)
 	}
+}
+
+// extractGHToken pulls the GitHub token from the Authorization header.
+// Supports "Bearer <token>" and "token <token>" formats.
+func extractGHToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return ""
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return auth
 }
 
 func readJSON(r *http.Request, dest any) error {

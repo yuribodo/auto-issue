@@ -1,6 +1,8 @@
-// Package main is the entry point for the auto-issue backend server.
-// It connects to PostgreSQL, runs migrations, initializes all components,
-// and starts the HTTP API.
+// Package main is the entry point for the API-only server.
+// It connects to PostgreSQL and serves the REST API without
+// the agent orchestrator or workspace manager — suitable for
+// cloud deployments (e.g. Render) where agent execution
+// happens on the user's local machine via the desktop app.
 package main
 
 import (
@@ -17,8 +19,6 @@ import (
 	"auto-issue/internal/config"
 	"auto-issue/internal/db"
 	"auto-issue/internal/repository"
-	"auto-issue/internal/service"
-	"auto-issue/internal/workspace"
 )
 
 func main() {
@@ -48,43 +48,22 @@ func main() {
 		}
 	}
 
-	// Read GH_TOKEN from environment
-	ghToken := os.Getenv("GH_TOKEN")
-	if ghToken == "" {
-		ghToken = os.Getenv("GITHUB_TOKEN")
-	}
-	if ghToken != "" {
-		slog.Info("GitHub token configured")
-	}
-
-	// Initialize workspace manager
-	wsMgr, err := workspace.NewManager(cfg.Workspace.BasePath)
-	if err != nil {
-		slog.Error("initializing workspace manager", "error", err)
-		os.Exit(1)
-	}
-
-	// Initialize broadcaster and orchestrator
-	broadcaster := api.NewBroadcaster()
-	orch := service.NewOrchestrator(wsMgr, issueRepo, cfg.Agent, cfg.Agent.APIKeys, broadcaster, ghToken, cfg.MaxConcurrency)
-	orch.Start()
-
-	// Allow PORT env var to override config (for bundled Electron usage)
+	// Allow PORT env var to override config
+	port := cfg.APIPort
 	if portStr := os.Getenv("PORT"); portStr != "" {
 		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
-			cfg.APIPort = p
+			port = p
 		}
 	}
 
-	// Set up HTTP server
-	handler := api.NewHandler(issueRepo, configRepo, orch, cfg, broadcaster)
+	// Set up HTTP server — no orchestrator, no broadcaster
+	handler := api.NewHandler(issueRepo, configRepo, nil, cfg, nil)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	// Wrap with CORS middleware
 	corsHandler := api.CORSMiddleware(mux)
 
-	addr := fmt.Sprintf(":%d", cfg.APIPort)
+	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: corsHandler}
 
 	// Graceful shutdown on SIGINT/SIGTERM
@@ -94,11 +73,10 @@ func main() {
 	go func() {
 		sig := <-sigCh
 		slog.Info("shutting down", "signal", sig)
-		orch.Shutdown()
 		srv.Close()
 	}()
 
-	slog.Info("server starting", "addr", addr)
+	slog.Info("API-only server starting", "addr", addr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
