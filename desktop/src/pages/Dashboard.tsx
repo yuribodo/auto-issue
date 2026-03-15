@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Run, User } from '../lib/types'
-import { getRuns, getMe } from '../lib/ipc'
+import { getRuns, getMe, syncNow, getConfig } from '../lib/ipc'
 import KanbanBoard from '../components/KanbanBoard'
 import UserMenu from '../components/UserMenu'
 import NotificationBell from '../components/NotificationBell'
+import type { SettingsData } from '../lib/types'
 
 export default function Dashboard() {
   const [runs, setRuns] = useState<Run[] | null>(null)
   const [user, setUser] = useState<User | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [config, setConfig] = useState<SettingsData | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -21,6 +24,11 @@ export default function Dashboard() {
       getRuns().then(setRuns)
     }, 5000)
     return () => clearInterval(interval)
+  }, [])
+
+  // Load config to determine if repos are configured
+  useEffect(() => {
+    getConfig().then(setConfig).catch(() => setConfig(null))
   }, [])
 
   const runningCount = runs ? runs.filter((r) => r.status === 'running').length : 0
@@ -37,8 +45,30 @@ export default function Dashboard() {
     navigate(`/run/${id}`)
   }
 
+  const handleSync = async () => {
+    if (syncing) return
+    setSyncing(true)
+    try {
+      await syncNow()
+      const updatedRuns = await getRuns()
+      setRuns(updatedRuns)
+    } catch (err) {
+      console.error('Sync failed:', err)
+      alert('Sync failed: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <div style={styles.page}>
+      {config?.monitored_repos?.length === 0 && (
+        <div style={styles.banner}>
+          <span>
+            No repositories configured for monitoring. Go to Settings &gt; Repos and enable at least one repository.
+          </span>
+        </div>
+      )}
       <nav style={styles.nav}>
         <div style={styles.navLeft}>
           {user && <UserMenu user={user} />}
@@ -67,9 +97,19 @@ export default function Dashboard() {
               <span style={styles.bracket}>]</span>
             </div>
           </div>
-          <button style={styles.newRunBtn} onClick={() => navigate('/create-run')}>
-            + New Run
-          </button>
+          <div style={styles.actions}>
+            <button style={styles.newRunBtn} onClick={() => navigate('/create-run')}>
+              + New Run
+            </button>
+            <button
+              style={styles.newRunBtn}
+              onClick={handleSync}
+              disabled={syncing}
+              aria-label="Sync runs"
+            >
+              {syncing ? 'Syncing...' : '↻ Sync'}
+            </button>
+          </div>
         </div>
 
         {runs === null ? (
@@ -132,6 +172,12 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: '16px',
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexShrink: 0,
   },
   metric: {
     display: 'flex',
@@ -196,5 +242,15 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid rgba(0, 230, 118, 0.15)',
     borderRadius: '4px',
     padding: '2px 8px',
+  },
+  banner: {
+    width: '100%',
+    padding: '12px 16px',
+    textAlign: 'center',
+    background: 'rgba(255, 235, 59, 0.15)',
+    color: '#7a5a00',
+    borderBottom: '1px solid rgba(255, 235, 59, 0.4)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
   },
 }

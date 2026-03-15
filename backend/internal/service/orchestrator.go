@@ -41,6 +41,8 @@ type Orchestrator struct {
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
+	mu          sync.Mutex
+	cancels     map[string]context.CancelFunc // per-issue cancel functions
 }
 
 // NewOrchestrator creates an Orchestrator wired to the given dependencies.
@@ -57,6 +59,7 @@ func NewOrchestrator(ws *workspace.Manager, issues repository.IssueRepository, d
 		sem:         make(chan struct{}, maxConcurrency),
 		ctx:         ctx,
 		cancel:      cancel,
+		cancels:     make(map[string]context.CancelFunc),
 	}
 }
 
@@ -68,6 +71,18 @@ func (o *Orchestrator) Start() {
 // Enqueue adds an issue to the work queue.
 func (o *Orchestrator) Enqueue(issueID string) {
 	o.queue <- IssueRequest{IssueID: issueID}
+}
+
+// CancelIssue cancels a running issue's agent process and transitions it to failed.
+func (o *Orchestrator) CancelIssue(issueID string) bool {
+	o.mu.Lock()
+	cancelFn, ok := o.cancels[issueID]
+	o.mu.Unlock()
+	if ok {
+		cancelFn()
+		return true
+	}
+	return false
 }
 
 // Shutdown stops accepting new work and waits for active workers to finish.
@@ -109,7 +124,20 @@ func (o *Orchestrator) broadcastEvent(issueID string, eventType agent.AgentEvent
 }
 
 func (o *Orchestrator) processIssue(issueID string) error {
-	issue, err := o.issues.Get(o.ctx, issueID)
+	// Create per-issue context for cancellation
+	issueCtx, issueCancel := context.WithCancel(o.ctx)
+	defer issueCancel()
+
+	o.mu.Lock()
+	o.cancels[issueID] = issueCancel
+	o.mu.Unlock()
+	defer func() {
+		o.mu.Lock()
+		delete(o.cancels, issueID)
+		o.mu.Unlock()
+	}()
+
+	issue, err := o.issues.Get(issueCtx, issueID)
 	if err != nil {
 		return fmt.Errorf("getting issue: %w", err)
 	}
@@ -138,7 +166,7 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	})
 	if err != nil {
 		o.broadcastEvent(issueID, agent.EventError, "ERR", fmt.Sprintf("Provider error: %s", err))
-		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
+		o.issues.Transition(context.Background(), issueID, constants.PhaseFailed)
 		return fmt.Errorf("creating provider: %w", err)
 	}
 
@@ -155,13 +183,13 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	}
 	if err != nil {
 		o.broadcastEvent(issueID, agent.EventError, "ERR", fmt.Sprintf("Workspace setup failed: %s", err))
-		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
+		o.issues.Transition(context.Background(), issueID, constants.PhaseFailed)
 		return fmt.Errorf("creating workspace: %w", err)
 	}
 
 	o.broadcastEvent(issueID, agent.EventStatus, "INFO", fmt.Sprintf("Workspace ready: %s", wsPath))
 
-	if err := o.issues.StartDeveloping(o.ctx, issueID, wsPath); err != nil {
+	if err := o.issues.StartDeveloping(issueCtx, issueID, wsPath); err != nil {
 		return fmt.Errorf("starting development: %w", err)
 	}
 
@@ -172,56 +200,67 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "developing")
 	slog.Info("starting development", "issue", issueID, "iteration", issue.Iteration)
 
-	devResult, err := o.runAgentStreaming(issueID, provider, wsPath, "developing", prompt)
+	devResult, err := o.runAgentStreaming(issueCtx, issueID, provider, wsPath, "developing", prompt)
 	if err != nil {
-		o.issues.UpdateOutput(o.ctx, issueID, devResult.Output, err.Error())
-		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
+		// Use background context for DB writes since issueCtx may be cancelled
+		bgCtx := context.Background()
+		o.issues.UpdateOutput(bgCtx, issueID, devResult.Output, err.Error())
+		o.issues.Transition(bgCtx, issueID, constants.PhaseFailed)
+		if issueCtx.Err() != nil {
+			o.broadcastEvent(issueID, agent.EventStatus, "INFO", "Issue cancelled by user")
+			return fmt.Errorf("issue cancelled")
+		}
 		return fmt.Errorf("development run: %w", err)
 	}
 
-	o.issues.UpdateOutput(o.ctx, issueID, devResult.Output, fmt.Sprintf("Development completed in %s", devResult.Duration))
+	o.issues.UpdateOutput(issueCtx, issueID, devResult.Output, fmt.Sprintf("Development completed in %s", devResult.Duration))
 
 	// Save PR URL and cost if detected during development
 	if devResult.PRURL != "" {
-		o.issues.UpdatePR(o.ctx, issueID, devResult.PRURL)
+		o.issues.UpdatePR(issueCtx, issueID, devResult.PRURL)
 	}
 	if devResult.CostUSD > 0 || devResult.Turns > 0 {
-		o.issues.UpdateCost(o.ctx, issueID, devResult.CostUSD, devResult.Turns)
+		o.issues.UpdateCost(issueCtx, issueID, devResult.CostUSD, devResult.Turns)
 	}
 
 	// Step 4: Transition to code reviewing
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "code_reviewing")
-	if err := o.issues.Transition(o.ctx, issueID, constants.PhaseCodeReviewing); err != nil {
+	if err := o.issues.Transition(issueCtx, issueID, constants.PhaseCodeReviewing); err != nil {
 		return fmt.Errorf("transition to code_reviewing: %w", err)
 	}
 
 	// Step 5: Run agent in code review mode with streaming
 	slog.Info("starting code review", "issue", issueID)
-	reviewResult, err := o.runAgentStreaming(issueID, provider, wsPath, "code_reviewing", prompt)
+	reviewResult, err := o.runAgentStreaming(issueCtx, issueID, provider, wsPath, "code_reviewing", prompt)
 	if err != nil {
-		o.issues.UpdateOutput(o.ctx, issueID, reviewResult.Output, err.Error())
-		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
+		bgCtx := context.Background()
+		o.issues.UpdateOutput(bgCtx, issueID, reviewResult.Output, err.Error())
+		o.issues.Transition(bgCtx, issueID, constants.PhaseFailed)
+		if issueCtx.Err() != nil {
+			o.broadcastEvent(issueID, agent.EventStatus, "INFO", "Issue cancelled by user")
+			return fmt.Errorf("issue cancelled")
+		}
 		return fmt.Errorf("code review run: %w", err)
 	}
 
 	// Append review output to existing output
 	combinedOutput := devResult.Output + "\n\n---\n\n# Code Review\n\n" + reviewResult.Output
 	combinedLogs := fmt.Sprintf("Development: %s\nCode Review: %s", devResult.Duration, reviewResult.Duration)
-	o.issues.UpdateOutput(o.ctx, issueID, combinedOutput, combinedLogs)
+	o.issues.UpdateOutput(issueCtx, issueID, combinedOutput, combinedLogs)
 
 	// Update total cost (dev + review)
 	totalCost := devResult.CostUSD + reviewResult.CostUSD
 	totalTurns := devResult.Turns + reviewResult.Turns
-	o.issues.UpdateCost(o.ctx, issueID, totalCost, totalTurns)
+	o.issues.UpdateCost(issueCtx, issueID, totalCost, totalTurns)
 
 	// Save PR URL if detected during review
 	if reviewResult.PRURL != "" && devResult.PRURL == "" {
-		o.issues.UpdatePR(o.ctx, issueID, reviewResult.PRURL)
+		o.issues.UpdatePR(issueCtx, issueID, reviewResult.PRURL)
 	}
 
 	// Step 6: Move to human review
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "human_review")
-	if err := o.issues.Transition(o.ctx, issueID, constants.PhaseHumanReview); err != nil {
+	if err := o.issues.Transition(issueCtx, issueID, constants.PhaseHumanReview); err != nil {
 		return fmt.Errorf("transition to human_review: %w", err)
 	}
 
@@ -233,8 +272,8 @@ func (o *Orchestrator) processIssue(issueID string) error {
 }
 
 // runAgentStreaming runs the agent and broadcasts all events to SSE subscribers.
-func (o *Orchestrator) runAgentStreaming(issueID string, provider agent.ProviderRunner, wsPath string, mode string, prompt string) (agent.RunResult, error) {
-	events, resultCh, err := provider.RunStreaming(o.ctx, wsPath, mode, prompt)
+func (o *Orchestrator) runAgentStreaming(ctx context.Context, issueID string, provider agent.ProviderRunner, wsPath string, mode string, prompt string) (agent.RunResult, error) {
+	events, resultCh, err := provider.RunStreaming(ctx, wsPath, mode, prompt)
 	if err != nil {
 		return agent.RunResult{}, err
 	}

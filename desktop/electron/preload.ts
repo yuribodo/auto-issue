@@ -3,10 +3,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 const ALLOWED_INVOKE = [
   'runs:list', 'runs:get', 'runs:create', 'runs:test', 'runs:cancel',
   'runs:approve', 'runs:reject', 'runs:delete', 'run:events:get',
+  'runs:diff', 'workspace:open-in-cursor',
   'config:get', 'config:save',
   'auth:me', 'auth:login', 'auth:logout',
-  'github:repos', 'github:issues', 'github:issue-detail',
+  'github:repos', 'github:issues', 'github:createIssue', 'github:issue-detail',
   'shell:open-external',
+  'poller:sync',
 ]
 
 const ALLOWED_ON = ['run:event', 'auth:success']

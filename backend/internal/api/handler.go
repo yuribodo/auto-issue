@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"os/exec"
+
 	"auto-issue/internal/config"
 	"auto-issue/internal/constants"
 	"auto-issue/internal/models"
@@ -186,6 +188,10 @@ func (h *Handler) handleIssueByPath(w http.ResponseWriter, r *http.Request) {
 		h.submitFeedback(w, r, issueID)
 	case "events":
 		h.streamEvents(w, r, issueID)
+	case "cancel":
+		h.cancelIssue(w, r, issueID)
+	case "diff":
+		h.getDiff(w, r, issueID)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "unknown action: "+action)
 	}
@@ -201,6 +207,41 @@ func (h *Handler) deleteIssue(w http.ResponseWriter, _ *http.Request, id string)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Issue deleted"})
+}
+
+func (h *Handler) cancelIssue(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only POST is allowed")
+		return
+	}
+
+	issue, err := h.issues.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	// Only cancel issues that are actively running
+	if issue.Phase != constants.PhaseDeveloping && issue.Phase != constants.PhaseCodeReviewing {
+		writeError(w, http.StatusConflict, "invalid_phase", fmt.Sprintf("cannot cancel issue in phase %s", issue.Phase))
+		return
+	}
+
+	// Cancel the agent process
+	h.orch.CancelIssue(id)
+
+	// Transition to failed
+	if err := h.issues.Transition(r.Context(), id, constants.PhaseFailed); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	updated, _ := h.issues.Get(r.Context(), id)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"message": "Issue cancelled",
+		"issue":   updated,
+	})
 }
 
 func (h *Handler) getIssue(w http.ResponseWriter, r *http.Request, id string) {
@@ -357,6 +398,124 @@ func (h *Handler) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"message": "Config reloaded successfully",
+	})
+}
+
+func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is allowed")
+		return
+	}
+
+	issue, err := h.issues.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	if issue.WorkspacePath == "" {
+		writeError(w, http.StatusBadRequest, "no_workspace", "issue has no workspace path")
+		return
+	}
+
+	// Get diff stat
+	statCmd := exec.Command("git", "diff", "HEAD~1", "--stat")
+	statCmd.Dir = issue.WorkspacePath
+	statOutput, err := statCmd.Output()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "git_error", fmt.Sprintf("git diff --stat failed: %v", err))
+		return
+	}
+
+	// Get full diff
+	diffCmd := exec.Command("git", "diff", "HEAD~1")
+	diffCmd.Dir = issue.WorkspacePath
+	diffOutput, err := diffCmd.Output()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "git_error", fmt.Sprintf("git diff failed: %v", err))
+		return
+	}
+
+	// Parse diff into structured response
+	type DiffFile struct {
+		Path      string `json:"path"`
+		Status    string `json:"status"`
+		Additions int    `json:"additions"`
+		Deletions int    `json:"deletions"`
+		Patch     string `json:"patch"`
+	}
+
+	type DiffSummary struct {
+		FilesChanged int `json:"files_changed"`
+		LinesAdded   int `json:"lines_added"`
+		LinesRemoved int `json:"lines_removed"`
+	}
+
+	files := []DiffFile{}
+	totalAdded := 0
+	totalRemoved := 0
+
+	// Parse the unified diff output into per-file patches
+	diffStr := string(diffOutput)
+	fileDiffs := strings.Split(diffStr, "diff --git ")
+
+	for _, fd := range fileDiffs {
+		if fd == "" {
+			continue
+		}
+
+		lines := strings.SplitN(fd, "\n", 2)
+		if len(lines) < 1 {
+			continue
+		}
+
+		// Extract file path from "a/path b/path"
+		parts := strings.Fields(lines[0])
+		filePath := ""
+		if len(parts) >= 2 {
+			filePath = strings.TrimPrefix(parts[1], "b/")
+		}
+
+		patch := "diff --git " + fd
+		added := 0
+		removed := 0
+
+		for _, line := range strings.Split(fd, "\n") {
+			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+				added++
+			} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+				removed++
+			}
+		}
+
+		status := "modified"
+		if strings.Contains(fd, "new file mode") {
+			status = "added"
+		} else if strings.Contains(fd, "deleted file mode") {
+			status = "deleted"
+		}
+
+		files = append(files, DiffFile{
+			Path:      filePath,
+			Status:    status,
+			Additions: added,
+			Deletions: removed,
+			Patch:     patch,
+		})
+
+		totalAdded += added
+		totalRemoved += removed
+	}
+
+	_ = statOutput // stat was used for validation; structured data comes from full diff
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"files": files,
+		"summary": DiffSummary{
+			FilesChanged: len(files),
+			LinesAdded:   totalAdded,
+			LinesRemoved: totalRemoved,
+		},
 	})
 }
 

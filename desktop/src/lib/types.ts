@@ -27,6 +27,7 @@ export interface Run {
   lines_added?: number
   lines_removed?: number
   cost_usd?: number
+  workspace_path?: string
 }
 
 export interface SSEEvent {
@@ -119,6 +120,7 @@ export interface SettingsData {
     run_failed: boolean
     pr_opened: boolean
   }
+  polling_enabled?: boolean
   polling_interval: number
   monitored_repos: string[]
 }
