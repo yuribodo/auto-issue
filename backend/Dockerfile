@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /auto-issue ./cmd/server
+RUN go build -o /auto-issue ./cmd/api
 
 FROM alpine:3.21
 

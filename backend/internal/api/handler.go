@@ -31,6 +31,7 @@ type Handler struct {
 }
 
 // NewHandler creates a Handler wired to the given dependencies.
+// orch and broadcaster may be nil for API-only deployments (no agent execution).
 func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigRepository, orch *service.Orchestrator, cfg *config.Config, broadcaster *Broadcaster) *Handler {
 	return &Handler{
 		issues:      issues,
@@ -228,6 +229,10 @@ func (h *Handler) cancelIssue(w http.ResponseWriter, r *http.Request, id string)
 	}
 
 	// Cancel the agent process
+	if h.orch == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "agent execution is not available on this server")
+		return
+	}
 	h.orch.CancelIssue(id)
 
 	// Transition to failed
@@ -274,6 +279,10 @@ func (h *Handler) moveIssue(w http.ResponseWriter, r *http.Request, id string) {
 	case "in_progress":
 		if err := h.issues.Transition(ctx, id, constants.PhaseDeveloping); err != nil {
 			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
+			return
+		}
+		if h.orch == nil {
+			writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "agent execution is not available on this server")
 			return
 		}
 		h.orch.Enqueue(id, extractGHToken(r))
@@ -347,7 +356,7 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	if issue.Phase == constants.PhaseDeveloping {
+	if issue.Phase == constants.PhaseDeveloping && h.orch != nil {
 		h.orch.Enqueue(issue.IssueID, extractGHToken(r))
 	}
 
@@ -370,6 +379,10 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
+	if h.broadcaster == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "event streaming is not available on this server")
+		return
+	}
 	h.broadcaster.ServeSSE(w, r, id)
 }
 
