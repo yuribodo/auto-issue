@@ -35,6 +35,8 @@ import {
   backendCreateRun,
   backendStartRun,
   backendApproveRun,
+  backendDeleteRun,
+  backendSubmitFeedback,
   backendSubscribeSSE,
   backendHealthCheck,
   type SSEConnection,
@@ -173,6 +175,16 @@ function registerIpcHandlers() {
     unsubscribeFromRunEvents(id)
   })
 
+  ipcMain.handle('runs:delete', async (_event, id: string) => {
+    unsubscribeFromRunEvents(id)
+    if (!useBackend) {
+      const { deleteRun } = await import('./runner')
+      deleteRun(id)
+      return
+    }
+    await backendDeleteRun(id)
+  })
+
   ipcMain.handle('runs:approve', async (_event, id: string) => {
     if (!useBackend) {
       const { loadRuns, persistRuns } = await import('./store')
@@ -190,7 +202,7 @@ function registerIpcHandlers() {
     unsubscribeFromRunEvents(id)
   })
 
-  ipcMain.handle('runs:reject', async (_event, id: string) => {
+  ipcMain.handle('runs:reject', async (_event, id: string, feedback?: string) => {
     if (!useBackend) {
       const { loadRuns, persistRuns } = await import('./store')
       const runs = loadRuns()
@@ -202,8 +214,9 @@ function registerIpcHandlers() {
       }
       return
     }
-    // Backend: submit feedback to reject (or just approve as done)
-    unsubscribeFromRunEvents(id)
+    await backendSubmitFeedback(id, feedback || 'Rejected by user — please fix the issues and try again.')
+    // Re-subscribe to SSE since the agent will restart
+    subscribeToRunEvents(id)
   })
 
   ipcMain.handle('run:events:get', (_event, runId: string) => {

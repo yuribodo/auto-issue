@@ -85,7 +85,7 @@ export default function AgentTerminal({ runId, run }: AgentTerminalProps) {
 
   const currentTurn = events.filter((e) => e.type === 'turn').length
   const isRunning = run?.status === 'running'
-  const issueNum = run?.issue_number ?? ''
+  const issueNum = run?.run_number ?? ''
 
   return (
     <div style={styles.container}>

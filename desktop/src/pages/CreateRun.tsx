@@ -5,6 +5,8 @@ import type { Provider, GitHubRepo, GitHubIssue } from '../lib/types'
 
 const MODELS: Record<string, string[]> = {
   anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'],
+  openai: ['codex-mini-latest', 'gpt-5.4', 'gpt-5.3-codex'],
+  gemini: ['gemini-3.1-pro', 'gemini-3.1-flash-lite'],
 }
 
 export default function CreateRun() {
@@ -22,9 +24,14 @@ export default function CreateRun() {
   const [hasMoreIssues, setHasMoreIssues] = useState(true)
   const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null)
 
-  const [provider] = useState<Provider>('anthropic')
+  const [provider, setProvider] = useState<Provider>('anthropic')
   const [model, setModel] = useState('claude-sonnet-4-6')
   const [submitting, setSubmitting] = useState(false)
+
+  // Reset model when provider changes
+  useEffect(() => {
+    setModel(MODELS[provider][0])
+  }, [provider])
 
   // Load repos
   useEffect(() => {
@@ -228,36 +235,35 @@ export default function CreateRun() {
               <button
                 style={{
                   ...styles.providerBtn,
-                  borderColor: 'var(--accent)',
-                  color: 'var(--accent)',
-                  background: 'var(--accent-flat)',
+                  borderColor: provider === 'anthropic' ? 'var(--accent)' : 'var(--border-mid)',
+                  color: provider === 'anthropic' ? 'var(--accent)' : 'var(--fg-muted)',
+                  background: provider === 'anthropic' ? 'var(--accent-flat)' : 'transparent',
                 }}
+                onClick={() => setProvider('anthropic')}
               >
                 ANTHROPIC
               </button>
               <button
                 style={{
                   ...styles.providerBtn,
-                  borderColor: 'var(--border-mid)',
-                  color: 'var(--fg-muted)',
-                  opacity: 0.5,
-                  cursor: 'not-allowed',
+                  borderColor: provider === 'openai' ? 'var(--accent)' : 'var(--border-mid)',
+                  color: provider === 'openai' ? 'var(--accent)' : 'var(--fg-muted)',
+                  background: provider === 'openai' ? 'var(--accent-flat)' : 'transparent',
                 }}
-                disabled
+                onClick={() => setProvider('openai')}
               >
-                CODEX <span style={styles.comingSoon}>Soon</span>
+                CODEX
               </button>
               <button
                 style={{
                   ...styles.providerBtn,
-                  borderColor: 'var(--border-mid)',
-                  color: 'var(--fg-muted)',
-                  opacity: 0.5,
-                  cursor: 'not-allowed',
+                  borderColor: provider === 'gemini' ? 'var(--accent)' : 'var(--border-mid)',
+                  color: provider === 'gemini' ? 'var(--accent)' : 'var(--fg-muted)',
+                  background: provider === 'gemini' ? 'var(--accent-flat)' : 'transparent',
                 }}
-                disabled
+                onClick={() => setProvider('gemini')}
               >
-                GEMINI <span style={styles.comingSoon}>Soon</span>
+                GEMINI
               </button>
             </div>
             <select
@@ -265,7 +271,7 @@ export default function CreateRun() {
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
-              {MODELS.anthropic.map((m) => (
+              {MODELS[provider].map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
@@ -488,11 +494,6 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     background: 'transparent',
     transition: 'all 150ms ease',
-  },
-  comingSoon: {
-    fontSize: '8px',
-    opacity: 0.6,
-    marginLeft: '4px',
   },
   select: {
     padding: '8px 12px',

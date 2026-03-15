@@ -69,16 +69,24 @@ function phaseToStatus(phase: string): Run['status'] {
 }
 
 // Convert backend Issue to desktop Run
+// Map backend agent_type to desktop provider
+const agentTypeToProvider: Record<string, Run['provider']> = {
+  'claude-code': 'anthropic',
+  codex: 'openai',
+  gemini: 'gemini',
+}
+
 function issueToRun(issue: any): Run {
   return {
     id: issue.id,
+    run_number: issue.run_number || 0,
     issue_number: issue.issue_number || 0,
     issue_title: issue.title,
     issue_body: issue.description,
     repo: issue.github_repo || issue.repo_path || '',
     status: phaseToStatus(issue.phase),
-    provider: 'anthropic',
-    model: 'claude-opus-4-6',
+    provider: agentTypeToProvider[issue.agent_type] || 'anthropic',
+    model: issue.agent_model || 'claude-opus-4-6',
     started_at: issue.started_at || issue.created_at,
     finished_at: issue.phase === 'done' || issue.phase === 'failed' ? issue.updated_at : undefined,
     turns: issue.turns || 0,
@@ -106,12 +114,21 @@ export async function backendGetRun(id: string): Promise<Run | null> {
 
 export async function backendCreateRun(params: CreateRunParams): Promise<Run> {
   // Step 1: Create issue in backend
+  // Map desktop provider names to backend agent_type
+  const providerToAgentType: Record<string, string> = {
+    anthropic: 'claude-code',
+    openai: 'codex',
+    gemini: 'gemini',
+  }
+
   const issue = await request('POST', '/api/v1/issues', {
     title: params.issue_title,
     description: params.issue_body || '',
     repo_path: '',
     github_repo: params.repo,
     issue_number: params.issue_number,
+    agent_type: providerToAgentType[params.provider] || '',
+    agent_model: params.model || '',
   })
 
   return issueToRun(issue)
@@ -124,6 +141,10 @@ export async function backendStartRun(id: string): Promise<void> {
 
 export async function backendApproveRun(id: string): Promise<void> {
   await request('PUT', `/api/v1/issues/${id}/move`, { to: 'done' })
+}
+
+export async function backendDeleteRun(id: string): Promise<void> {
+  await request('DELETE', `/api/v1/issues/${id}`)
 }
 
 export async function backendSubmitFeedback(id: string, feedback: string): Promise<void> {

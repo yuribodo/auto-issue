@@ -63,7 +63,7 @@ export default function RunCard({ run, onClick }: RunCardProps) {
         <div style={styles.scannerLine} />
       )}
       <div style={styles.header}>
-        <span style={styles.label}>#{run.issue_number}</span>
+        <span style={styles.label}>#{run.run_number}</span>
         <ProviderBadge provider={run.provider} model={run.model} />
         <span style={{ ...styles.statusLabel, color: statusColor, borderColor: statusColor }}>
           [ {run.status.toUpperCase().replace('_', ' ')} ]

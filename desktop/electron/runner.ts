@@ -54,9 +54,9 @@ function buildCommand(provider: Provider): { cmd: string; args: string[] } {
     case 'anthropic':
       return { cmd: 'claude', args: ['-p', '--verbose', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--include-partial-messages'] }
     case 'openai':
-      return { cmd: 'codex', args: [] }
+      return { cmd: 'codex', args: ['exec', '--full-auto', '--json'] }
     case 'gemini':
-      return { cmd: 'gemini', args: [] }
+      return { cmd: 'gemini', args: ['-p'] }
   }
 }
 
@@ -98,9 +98,16 @@ const PR_REGEX = /https:\/\/github\.com\/.+\/pull\/\d+/
 
 // --- Public API ---
 
+function nextRunNumber(): number {
+  const runs = loadRuns()
+  const max = runs.reduce((m, r) => Math.max(m, r.run_number ?? 0), 0)
+  return max + 1
+}
+
 export function createRun(params: CreateRunParams): Run {
   const run: Run = {
     id: `run-${crypto.randomUUID().slice(0, 8)}`,
+    run_number: nextRunNumber(),
     issue_number: params.issue_number,
     issue_title: params.issue_title,
     issue_body: params.issue_body,
@@ -158,13 +165,17 @@ export async function startRun(runId: string): Promise<void> {
 
   emitEvent(runId, makeEvent('log', 'INFO', `Spawning: ${cmd} ${args.join(' ')} "<prompt>"`))
 
-  // Use `script` to allocate a PTY so Claude CLI doesn't buffer stdout
+  // Use `script` to allocate a PTY for Claude CLI to avoid stdout buffering
+  // Codex and Gemini don't need PTY wrapping
   const fullArgs = [...args, prompt]
-  const escapedCmd = [cmd, ...fullArgs].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
-  const child = spawn('script', ['-qc', escapedCmd, '/dev/null'], {
-    cwd: worktreePath,
-    env: { ...process.env, ...providerEnv, GH_TOKEN: authToken, GITHUB_TOKEN: authToken },
-  })
+  const spawnEnv = { ...process.env, ...providerEnv, GH_TOKEN: authToken, GITHUB_TOKEN: authToken }
+  let child: ChildProcess
+  if (run.provider === 'anthropic') {
+    const escapedCmd = [cmd, ...fullArgs].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
+    child = spawn('script', ['-qc', escapedCmd, '/dev/null'], { cwd: worktreePath, env: spawnEnv })
+  } else {
+    child = spawn(cmd, fullArgs, { cwd: worktreePath, env: spawnEnv })
+  }
 
   managed.child = child
 
@@ -310,7 +321,25 @@ export async function startRun(runId: string): Promise<void> {
     }
   }
 
-  child.stdout?.on('data', (data: Buffer) => handleStreamJson(data))
+  const handlePlainTextOutput = (chunk: Buffer) => {
+    const lines = chunk.toString().split('\n')
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      emitEvent(runId, makeEvent('log', 'AGENT', trimmed))
+
+      const prMatch = trimmed.match(PR_REGEX)
+      if (prMatch) {
+        run.pr_url = prMatch[0]
+        run.status = 'awaiting_approval'
+        updateRun(run)
+        emitEvent(runId, makeEvent('status', 'PR', prMatch[0]))
+      }
+    }
+  }
+
+  child.stdout?.on('data', run.provider === 'anthropic' ? handleStreamJson : handlePlainTextOutput)
   child.stderr?.on('data', (data: Buffer) => {
     const lines = data.toString().split('\n').filter((l) => l.length > 0)
     for (const line of lines) {
@@ -358,6 +387,7 @@ export async function startTestRun(provider: Provider): Promise<Run> {
 
   const run: Run = {
     id: `test-${crypto.randomUUID().slice(0, 8)}`,
+    run_number: nextRunNumber(),
     issue_number: 0,
     issue_title: 'Test Run',
     issue_body: '',
@@ -441,6 +471,17 @@ export function cancelRun(runId: string): void {
   managed.run.finished_at = new Date().toISOString()
   updateRun(managed.run)
   emitEvent(runId, makeEvent('status', 'WARN', 'Run cancelled by user'))
+}
+
+export function deleteRun(id: string): void {
+  const managed = registry.get(id)
+  if (managed?.child) {
+    managed.child.kill('SIGTERM')
+    managed.child = null
+  }
+  registry.delete(id)
+  const runs = loadRuns().filter((r) => r.id !== id)
+  persistRuns(runs)
 }
 
 export function getAllRuns(): Run[] {
