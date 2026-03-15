@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGitHubRepos, createGitHubIssue, createRun, getGitHubIssues } from '../lib/ipc'
+import { getGitHubRepos, createGitHubIssue, createRun, getGitHubIssues, getConfig } from '../lib/ipc'
 import type { Provider, GitHubRepo, GitHubIssue } from '../lib/types'
 
 const MODELS: Record<string, string[]> = {
@@ -15,8 +15,7 @@ export default function CreateRun() {
   const navigate = useNavigate()
   const [repos, setRepos] = useState<GitHubRepo[]>([])
   const [reposLoading, setReposLoading] = useState(true)
-  const [reposPage, setReposPage] = useState(1)
-  const [hasMoreRepos, setHasMoreRepos] = useState(true)
+  const [monitoredRepos, setMonitoredRepos] = useState<string[]>([])
   const [repoSearch, setRepoSearch] = useState('')
 
   const [selectedRepo, setSelectedRepo] = useState('')
@@ -41,13 +40,14 @@ export default function CreateRun() {
     setModel(MODELS[provider][0])
   }, [provider])
 
-  // Load repos
+  // Load repos and config, then filter to only show monitored repos
   useEffect(() => {
     setReposLoading(true)
-    getGitHubRepos(1)
-      .then((r) => {
+    Promise.all([getGitHubRepos(1), getConfig()])
+      .then(([r, config]) => {
+        const monitored = config.monitored_repos ?? []
+        setMonitoredRepos(monitored)
         setRepos(r)
-        setHasMoreRepos(r.length === 30)
         setReposLoading(false)
       })
       .catch((err) => {
@@ -83,18 +83,6 @@ export default function CreateRun() {
 
     loadIssues()
   }, [selectedRepo, issueMode])
-
-  const loadMoreRepos = async () => {
-    const nextPage = reposPage + 1
-    setReposPage(nextPage)
-    try {
-      const more = await getGitHubRepos(nextPage)
-      setRepos((prev) => [...prev, ...more])
-      setHasMoreRepos(more.length === 30)
-    } catch (err) {
-      console.error('Failed to load more repos:', err)
-    }
-  }
 
   const handleSubmit = async () => {
     if (!selectedRepo) return
@@ -142,9 +130,13 @@ export default function CreateRun() {
     }
   }
 
+  const enabledRepos = monitoredRepos.length > 0
+    ? repos.filter((r) => monitoredRepos.includes(r.full_name))
+    : []
+
   const filteredRepos = repoSearch
-    ? repos.filter((r) => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
-    : repos
+    ? enabledRepos.filter((r) => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
+    : enabledRepos
 
   const filteredIssues = issueSearch
     ? issues.filter((i) => 
@@ -181,39 +173,45 @@ export default function CreateRun() {
           />
           {reposLoading ? (
             <div style={styles.emptyMsg}>Loading repositories...</div>
+          ) : monitoredRepos.length === 0 ? (
+            <div style={styles.emptyMsg}>
+              No repositories enabled. Go to{' '}
+              <button
+                style={{ ...styles.inlineLink }}
+                onClick={() => navigate('/settings')}
+              >
+                Settings → Repos
+              </button>{' '}
+              to enable repositories.
+            </div>
+          ) : filteredRepos.length === 0 ? (
+            <div style={styles.emptyMsg}>No matching repositories found.</div>
           ) : (
-            <>
-              <div style={styles.optionList}>
-                {filteredRepos.map((r) => (
-                  <button
-                    key={r.id}
-                    style={{
-                      ...styles.optionBtn,
-                      borderColor: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--border-mid)',
-                      color: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--fg)',
-                      background: selectedRepo === r.full_name ? 'var(--accent-flat)' : 'transparent',
-                    }}
-                    onClick={() => {
-                      setSelectedRepo(r.full_name)
-                      setSelectedIssue(null)
-                    }}
-                  >
-                    <span style={styles.optionName}>
-                      {r.full_name}
-                      {r.private && <span style={styles.privateBadge}>PRIVATE</span>}
-                    </span>
-                    <span style={styles.optionMeta}>
-                      {r.open_issues_count} issues{r.language ? ` · ${r.language}` : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {hasMoreRepos && !repoSearch && (
-                <button style={styles.loadMoreBtn} onClick={loadMoreRepos}>
-                  Load more repos
+            <div style={styles.optionList}>
+              {filteredRepos.map((r) => (
+                <button
+                  key={r.id}
+                  style={{
+                    ...styles.optionBtn,
+                    borderColor: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--border-mid)',
+                    color: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--fg)',
+                    background: selectedRepo === r.full_name ? 'var(--accent-flat)' : 'transparent',
+                  }}
+                  onClick={() => {
+                    setSelectedRepo(r.full_name)
+                    setSelectedIssue(null)
+                  }}
+                >
+                  <span style={styles.optionName}>
+                    {r.full_name}
+                    {r.private && <span style={styles.privateBadge}>PRIVATE</span>}
+                  </span>
+                  <span style={styles.optionMeta}>
+                    {r.open_issues_count} issues{r.language ? ` · ${r.language}` : ''}
+                  </span>
                 </button>
-              )}
-            </>
+              ))}
+            </div>
           )}
         </div>
 
@@ -542,16 +540,15 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'var(--fg-muted)',
     padding: '16px 0',
   },
-  loadMoreBtn: {
-    padding: '8px',
-    background: 'transparent',
+  inlineLink: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
     color: 'var(--accent)',
-    border: '1px dashed var(--border-mid)',
-    borderRadius: '4px',
     fontFamily: 'var(--font-mono)',
-    fontSize: '11px',
+    fontSize: '12px',
     cursor: 'pointer',
-    letterSpacing: '0.06em',
+    textDecoration: 'underline',
   },
   modeRow: {
     display: 'flex',
