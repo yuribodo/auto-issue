@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Config struct {
-	ID             int       `json:"-" gorm:"primaryKey;default:1;check:id = 1"`
+	ID             int       `json:"-" gorm:"primaryKey;autoIncrement:false;default:1;check:chk_configs_id,id = 1"`
 	APIPort        int       `json:"api_port" gorm:"not null;default:8080"`
 	MaxConcurrency int       `json:"max_concurrency" gorm:"not null;default:10"`
 	AgentType      string    `json:"agent_type" gorm:"not null;default:'claude-code'"`
