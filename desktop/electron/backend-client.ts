@@ -92,13 +92,15 @@ function issueToRun(issue: any): Run {
     turns: issue.turns || 0,
     pr_url: issue.pr_url || undefined,
     cost_usd: issue.cost_usd || undefined,
+    workspace_path: issue.workspace_path || undefined,
   }
 }
 
 // --- Public API ---
 
-export async function backendListRuns(): Promise<Run[]> {
-  const resp = await request('GET', '/api/v1/issues')
+export async function backendListRuns(githubUser?: string): Promise<Run[]> {
+  const query = githubUser ? `?github_user=${encodeURIComponent(githubUser)}` : ''
+  const resp = await request('GET', `/api/v1/issues${query}`)
   const issues = resp.issues || []
   return issues.map(issueToRun)
 }
@@ -112,8 +114,7 @@ export async function backendGetRun(id: string): Promise<Run | null> {
   }
 }
 
-export async function backendCreateRun(params: CreateRunParams): Promise<Run> {
-  // Step 1: Create issue in backend
+export async function backendCreateRun(params: CreateRunParams, githubUser: string): Promise<Run> {
   // Map desktop provider names to backend agent_type
   const providerToAgentType: Record<string, string> = {
     anthropic: 'claude-code',
@@ -129,6 +130,7 @@ export async function backendCreateRun(params: CreateRunParams): Promise<Run> {
     issue_number: params.issue_number,
     agent_type: providerToAgentType[params.provider] || '',
     agent_model: params.model || '',
+    github_user: githubUser,
   })
 
   return issueToRun(issue)
@@ -141,6 +143,10 @@ export async function backendStartRun(id: string): Promise<void> {
 
 export async function backendApproveRun(id: string): Promise<void> {
   await request('PUT', `/api/v1/issues/${id}/move`, { to: 'done' })
+}
+
+export async function backendCancelRun(id: string): Promise<void> {
+  await request('POST', `/api/v1/issues/${id}/cancel`)
 }
 
 export async function backendDeleteRun(id: string): Promise<void> {
@@ -272,6 +278,10 @@ function mapEventType(type: string): SSEEvent['type'] {
     default:
       return 'log'
   }
+}
+
+export async function backendGetDiff(id: string): Promise<any> {
+  return request('GET', `/api/v1/issues/${id}/diff`)
 }
 
 // Check if backend is reachable
