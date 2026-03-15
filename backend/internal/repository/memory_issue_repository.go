@@ -152,6 +152,54 @@ func (r *MemoryIssueRepository) UpdateOutput(_ context.Context, id string, outpu
 	return nil
 }
 
+func (r *MemoryIssueRepository) CreateWithGithub(_ context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.issues[id]; exists {
+		return nil, fmt.Errorf("issue %q already exists", id)
+	}
+
+	issue := &models.Issue{
+		IssueID:     id,
+		Title:       title,
+		Description: description,
+		Phase:       constants.PhaseBacklog,
+		RepoPath:    repoPath,
+		GithubRepo:  githubRepo,
+		IssueNumber: issueNumber,
+	}
+	r.issues[id] = issue
+	return copyIssue(issue), nil
+}
+
+func (r *MemoryIssueRepository) UpdatePR(_ context.Context, id string, prURL string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	issue, ok := r.issues[id]
+	if !ok {
+		return fmt.Errorf("issue %q not found", id)
+	}
+
+	issue.PRURL = prURL
+	return nil
+}
+
+func (r *MemoryIssueRepository) UpdateCost(_ context.Context, id string, costUSD float64, turns int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	issue, ok := r.issues[id]
+	if !ok {
+		return fmt.Errorf("issue %q not found", id)
+	}
+
+	issue.CostUSD = costUSD
+	issue.Turns = turns
+	return nil
+}
+
 func copyIssue(src *models.Issue) *models.Issue {
 	c := *src
 	return &c
