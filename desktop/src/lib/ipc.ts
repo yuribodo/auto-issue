@@ -59,3 +59,11 @@ export async function getGitHubIssues(owner: string, repo: string, page?: number
 export async function getGitHubIssueDetail(owner: string, repo: string, num: number) {
   return window.electronAPI.invoke('github:issue-detail', owner, repo, num) as Promise<GitHubIssue>
 }
+
+export async function getRunDiff(id: string): Promise<any> {
+  return window.electronAPI.invoke('runs:diff', id)
+}
+
+export async function openInCursor(workspacePath: string): Promise<void> {
+  await window.electronAPI.invoke('workspace:open-in-cursor', workspacePath)
+}
