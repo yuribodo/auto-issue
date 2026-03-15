@@ -53,7 +53,7 @@ export default function Home() {
       <section className="how-it-works">
         <div className="how-it-works-header">
           <p className="section-label">[ HOW IT WORKS ]</p>
-          <h2 className="section-title">Three steps. Zero babysitting.</h2>
+          <h2 className="section-title">Three steps. Zero lost time.</h2>
         </div>
         <div className="steps-grid">
           <div className="step">
