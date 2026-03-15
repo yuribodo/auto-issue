@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"auto-issue/internal/api"
@@ -67,6 +68,13 @@ func main() {
 	broadcaster := api.NewBroadcaster()
 	orch := service.NewOrchestrator(wsMgr, issueRepo, cfg.Agent, cfg.Agent.APIKeys, broadcaster, ghToken, cfg.MaxConcurrency)
 	orch.Start()
+
+	// Allow PORT env var to override config (for bundled Electron usage)
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
+			cfg.APIPort = p
+		}
+	}
 
 	// Set up HTTP server
 	handler := api.NewHandler(issueRepo, configRepo, orch, cfg, broadcaster)
