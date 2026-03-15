@@ -12,10 +12,39 @@ jobs:
   release:
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            cgo: 1
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            cgo: 0
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cgo: 1
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Build Go backend
+        shell: bash
+        run: |
+          mkdir -p desktop/resources/backend
+          cd backend
+          BINARY="auto-issue-backend"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY="auto-issue-backend.exe"
+          fi
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=${{ matrix.cgo }} \
+            go build -ldflags="-s -w" -o ../desktop/resources/backend/$BINARY ./cmd/server
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
