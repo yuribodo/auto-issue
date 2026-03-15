@@ -6,8 +6,9 @@ const ALLOWED_INVOKE = [
   'runs:diff', 'workspace:open-in-cursor',
   'config:get', 'config:save',
   'auth:me', 'auth:login', 'auth:logout',
-  'github:repos', 'github:issues', 'github:issue-detail',
+  'github:repos', 'github:issues', 'github:createIssue', 'github:issue-detail',
   'shell:open-external',
+  'poller:sync',
 ]
 
 const ALLOWED_ON = ['run:event', 'auth:success']

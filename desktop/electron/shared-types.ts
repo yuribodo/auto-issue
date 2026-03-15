@@ -78,6 +78,8 @@ export interface SettingsData {
   }
   polling_interval: number
   monitored_repos: string[]
+  // Whether the GitHub poller is enabled. If omitted, defaults to true.
+  polling_enabled?: boolean
 }
 
 export interface CreateRunParams {

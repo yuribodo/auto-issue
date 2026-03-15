@@ -48,6 +48,7 @@ const DEFAULT_CONFIG: SettingsData = {
   notifications: { approval_needed: true, run_failed: true, pr_opened: false },
   polling_interval: 5,
   monitored_repos: [],
+  polling_enabled: true,
 }
 
 export function loadConfig(): SettingsData {
