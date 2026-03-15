@@ -5,8 +5,9 @@ const ALLOWED_INVOKE = [
   'runs:approve', 'runs:reject', 'runs:delete', 'run:events:get',
   'config:get', 'config:save',
   'auth:me', 'auth:login', 'auth:logout',
-  'github:repos', 'github:issues', 'github:issue-detail',
+  'github:repos', 'github:issues', 'github:createIssue', 'github:issue-detail',
   'shell:open-external',
+  'poller:sync',
 ]
 
 const ALLOWED_ON = ['run:event', 'auth:success']

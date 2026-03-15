@@ -59,3 +59,12 @@ export async function getGitHubIssues(owner: string, repo: string, page?: number
 export async function getGitHubIssueDetail(owner: string, repo: string, num: number) {
   return window.electronAPI.invoke('github:issue-detail', owner, repo, num) as Promise<GitHubIssue>
 }
+
+// Create a new GitHub issue for the given repository and return its number and URL
+export async function createGitHubIssue(owner: string, repo: string, title: string, body: string) {
+  return window.electronAPI.invoke('github:createIssue', { owner, repo, title, body }) as Promise<{ number: number; url: string }>
+}
+
+export async function syncNow(): Promise<void> {
+  await window.electronAPI.invoke('poller:sync')
+}

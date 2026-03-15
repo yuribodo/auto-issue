@@ -119,6 +119,7 @@ export interface SettingsData {
     run_failed: boolean
     pr_opened: boolean
   }
+  polling_enabled?: boolean
   polling_interval: number
   monitored_repos: string[]
 }
