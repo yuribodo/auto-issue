@@ -14,16 +14,23 @@ let cachedUser: GitHubUser | null = null
 let pollingAbort: AbortController | null = null
 
 function saveToken(token: string): void {
-  const encrypted = safeStorage.encryptString(token)
   fs.mkdirSync(path.dirname(authFilePath), { recursive: true })
-  fs.writeFileSync(authFilePath, encrypted)
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(token)
+    fs.writeFileSync(authFilePath, encrypted)
+  } else {
+    fs.writeFileSync(authFilePath, Buffer.from(token, 'utf-8'))
+  }
 }
 
 function loadToken(): string | null {
   try {
     if (!fs.existsSync(authFilePath)) return null
-    const encrypted = fs.readFileSync(authFilePath)
-    return safeStorage.decryptString(encrypted)
+    const data = fs.readFileSync(authFilePath)
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(data)
+    }
+    return data.toString('utf-8')
   } catch {
     return null
   }
