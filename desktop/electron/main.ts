@@ -43,6 +43,7 @@ import {
   backendHealthCheck,
   backendGetDiff,
   setBackendUrl,
+  setAuthTokenGetter,
   type SSEConnection,
 } from './backend-client'
 import { spawnDaemon, killDaemon } from './daemon'
@@ -354,6 +355,7 @@ function registerIpcHandlers() {
 
 app.whenReady().then(async () => {
   setBroadcast(broadcastEvent)
+  setAuthTokenGetter(getAuthToken)
 
   // Check if backend is available
   useBackend = await backendHealthCheck()

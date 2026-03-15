@@ -276,7 +276,7 @@ func (h *Handler) moveIssue(w http.ResponseWriter, r *http.Request, id string) {
 			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
 			return
 		}
-		h.orch.Enqueue(id)
+		h.orch.Enqueue(id, extractGHToken(r))
 
 		issue, err := h.issues.Get(ctx, id)
 		if err != nil {
@@ -348,7 +348,7 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 	}
 
 	if issue.Phase == constants.PhaseDeveloping {
-		h.orch.Enqueue(issue.IssueID)
+		h.orch.Enqueue(issue.IssueID, extractGHToken(r))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -537,6 +537,20 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 	}); err != nil {
 		http.Error(w, fmt.Errorf("encoding error response: %w", err).Error(), http.StatusInternalServerError)
 	}
+}
+
+// extractGHToken pulls the GitHub token from the Authorization header.
+// Supports "Bearer <token>" and "token <token>" formats.
+func extractGHToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return ""
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return auth
 }
 
 func readJSON(r *http.Request, dest any) error {

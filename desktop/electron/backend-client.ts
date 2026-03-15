@@ -7,6 +7,10 @@ import type { Run, SSEEvent, CreateRunParams } from './shared-types'
 let BACKEND_URL = process.env.BACKEND_URL || ''
 export function setBackendUrl(url: string): void { BACKEND_URL = url }
 
+// Auth token getter — set by main process so backend requests carry the user's GitHub token
+let authTokenGetter: (() => string | null) | null = null
+export function setAuthTokenGetter(getter: () => string | null): void { authTokenGetter = getter }
+
 // --- HTTP helpers ---
 
 function request(method: string, path: string, body?: unknown): Promise<any> {
@@ -14,6 +18,7 @@ function request(method: string, path: string, body?: unknown): Promise<any> {
     const url = new URL(path, BACKEND_URL)
     const payload = body ? JSON.stringify(body) : undefined
 
+    const token = authTokenGetter?.()
     const req = http.request(
       {
         hostname: url.hostname,
@@ -22,6 +27,7 @@ function request(method: string, path: string, body?: unknown): Promise<any> {
         method,
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
         },
       },
