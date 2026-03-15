@@ -143,3 +143,17 @@ desktop/release/
 
 # Bundled backend binary (built by scripts/build-backend.sh)
 desktop/resources/backend/
+
+# Go compiled binaries
+backend/server
+backend/server.exe
+backend/api
+backend/auto-issue
+backend/auto-issue-backend
+
+# Electron build artifacts
+desktop/dist-electron/
+desktop/squashfs-root/
+
+# Git worktrees
+.worktrees/
