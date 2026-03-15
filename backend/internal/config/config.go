@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
+	"os"
 	"time"
 )
 
@@ -27,7 +27,7 @@ type WorkspaceConfig struct {
 	BasePath string `json:"base_path"`
 }
 
-// Duration wraps time.Duration for JSON unmarshalling from string (e.g. "20m").
+// Duration wraps time.Duration for JSON marshalling as string (e.g. "20m").
 type Duration struct {
 	time.Duration
 }
@@ -49,34 +49,11 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.Duration.String())
 }
 
-// DefaultConfigPath returns ~/.auto-issue/config.json unless CONFIG_PATH is set.
-func DefaultConfigPath() string {
-	if p := os.Getenv("CONFIG_PATH"); p != "" {
-		return p
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".auto-issue", "config.json")
-}
-
-// Load reads and parses the config file, applying defaults for missing fields.
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading config file: %w", err)
-	}
-
+// Default returns a Config with all default values applied.
+func Default() *Config {
 	cfg := &Config{}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
-	}
-
 	cfg.applyDefaults()
-
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
-	}
-
-	return cfg, nil
+	return cfg
 }
 
 func (c *Config) applyDefaults() {

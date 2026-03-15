@@ -1,4 +1,4 @@
-package orchestrator
+package service
 
 import (
 	"context"
@@ -11,13 +11,13 @@ import (
 
 	"auto-issue/internal/agent"
 	"auto-issue/internal/config"
-	"auto-issue/internal/state"
+	"auto-issue/internal/constants"
+	"auto-issue/internal/models"
+	"auto-issue/internal/repository"
 	"auto-issue/internal/workspace"
 )
 
-// setupTestEnv creates a complete test environment with a fake agent script
-// that just echoes instead of calling real Claude Code.
-func setupTestEnv(t *testing.T) (*Orchestrator, *state.Store, string) {
+func setupTestEnv(t *testing.T) (*Orchestrator, repository.IssueRepository, string) {
 	t.Helper()
 
 	// Create a fake repo with git init
@@ -33,12 +33,8 @@ func setupTestEnv(t *testing.T) (*Orchestrator, *state.Store, string) {
 	// Add fake agent to PATH
 	os.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	// State store
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	st, err := state.NewStore(statePath)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
-	}
+	// Issue repository (in-memory)
+	issueRepo := repository.NewMemoryIssueRepository()
 
 	// Workspace manager
 	wsBase := filepath.Join(t.TempDir(), "workspaces")
@@ -54,8 +50,8 @@ func setupTestEnv(t *testing.T) (*Orchestrator, *state.Store, string) {
 		Timeout: config.Duration{Duration: 30 * time.Second},
 	})
 
-	orch := New(ws, st, runner, 2)
-	return orch, st, repoDir
+	orch := NewOrchestrator(ws, issueRepo, runner, 2)
+	return orch, issueRepo, repoDir
 }
 
 func initGitRepo(t *testing.T, dir string) {
@@ -76,22 +72,20 @@ func initGitRepo(t *testing.T, dir string) {
 }
 
 func TestProcessIssueFullCycle(t *testing.T) {
-	orch, st, repoDir := setupTestEnv(t)
+	orch, repo, repoDir := setupTestEnv(t)
 	defer orch.Shutdown()
+	ctx := context.Background()
 
-	// Create issue and move to developing
-	st.Create("issue-1", "Add feature", "Implement the feature", repoDir)
-	st.Transition("issue-1", state.PhaseDeveloping)
+	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir)
+	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 
-	// Process the issue directly (not via queue)
 	err := orch.processIssue("issue-1")
 	if err != nil {
 		t.Fatalf("processIssue: %v", err)
 	}
 
-	// Verify final state is human_review
-	issue, _ := st.Get("issue-1")
-	if issue.Phase != state.PhaseHumanReview {
+	issue, _ := repo.Get(ctx, "issue-1")
+	if issue.Phase != constants.PhaseHumanReview {
 		t.Errorf("phase = %s, want human_review", issue.Phase)
 	}
 	if issue.LastOutput == "" {
@@ -103,33 +97,31 @@ func TestProcessIssueFullCycle(t *testing.T) {
 }
 
 func TestProcessIssueWithFeedback(t *testing.T) {
-	orch, st, repoDir := setupTestEnv(t)
+	orch, repo, repoDir := setupTestEnv(t)
 	defer orch.Shutdown()
+	ctx := context.Background()
 
-	// Create and run first cycle
-	st.Create("issue-1", "Add feature", "Implement the feature", repoDir)
-	st.Transition("issue-1", state.PhaseDeveloping)
+	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir)
+	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 	orch.processIssue("issue-1")
 
-	// Submit feedback (reprove)
-	err := st.SetFeedback("issue-1", "Add unit tests please", 3)
+	err := repo.SetFeedback(ctx, "issue-1", "Add unit tests please", 3)
 	if err != nil {
 		t.Fatalf("SetFeedback: %v", err)
 	}
 
-	issue, _ := st.Get("issue-1")
-	if issue.Phase != state.PhaseDeveloping {
+	issue, _ := repo.Get(ctx, "issue-1")
+	if issue.Phase != constants.PhaseDeveloping {
 		t.Fatalf("phase after feedback = %s, want developing", issue.Phase)
 	}
 
-	// Run second cycle
 	err = orch.processIssue("issue-1")
 	if err != nil {
 		t.Fatalf("processIssue iteration 2: %v", err)
 	}
 
-	issue, _ = st.Get("issue-1")
-	if issue.Phase != state.PhaseHumanReview {
+	issue, _ = repo.Get(ctx, "issue-1")
+	if issue.Phase != constants.PhaseHumanReview {
 		t.Errorf("phase = %s, want human_review", issue.Phase)
 	}
 	if issue.Iteration != 2 {
@@ -138,11 +130,10 @@ func TestProcessIssueWithFeedback(t *testing.T) {
 }
 
 func TestProcessIssueWrongPhase(t *testing.T) {
-	orch, st, repoDir := setupTestEnv(t)
+	orch, repo, repoDir := setupTestEnv(t)
 	defer orch.Shutdown()
 
-	st.Create("issue-1", "Feature", "Desc", repoDir)
-	// Issue is in backlog, not developing
+	repo.Create(context.Background(), "issue-1", "Feature", "Desc", repoDir)
 	err := orch.processIssue("issue-1")
 	if err == nil {
 		t.Fatal("expected error for wrong phase")
@@ -150,21 +141,21 @@ func TestProcessIssueWrongPhase(t *testing.T) {
 }
 
 func TestEnqueueAndProcess(t *testing.T) {
-	orch, st, repoDir := setupTestEnv(t)
+	orch, repo, repoDir := setupTestEnv(t)
 	orch.Start()
 	defer orch.Shutdown()
+	ctx := context.Background()
 
-	st.Create("issue-1", "Feature", "Build it", repoDir)
-	st.Transition("issue-1", state.PhaseDeveloping)
+	repo.Create(ctx, "issue-1", "Feature", "Build it", repoDir)
+	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 
 	orch.Enqueue("issue-1")
 
-	// Poll for completion
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		issue, _ := st.Get("issue-1")
-		if issue.Phase == state.PhaseHumanReview {
-			return // success
+		issue, _ := repo.Get(ctx, "issue-1")
+		if issue.Phase == constants.PhaseHumanReview {
+			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -172,25 +163,24 @@ func TestEnqueueAndProcess(t *testing.T) {
 }
 
 func TestConcurrentIssues(t *testing.T) {
-	orch, st, repoDir := setupTestEnv(t)
+	orch, repo, repoDir := setupTestEnv(t)
 	orch.Start()
 	defer orch.Shutdown()
+	ctx := context.Background()
 
-	// Enqueue 3 issues
 	for i := 1; i <= 3; i++ {
 		id := fmt.Sprintf("issue-%d", i)
-		st.Create(id, fmt.Sprintf("Feature %d", i), "Build it", repoDir)
-		st.Transition(id, state.PhaseDeveloping)
+		repo.Create(ctx, id, fmt.Sprintf("Feature %d", i), "Build it", repoDir)
+		repo.Transition(ctx, id, constants.PhaseDeveloping)
 		orch.Enqueue(id)
 	}
 
-	// Wait for all to complete
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		allDone := true
 		for i := 1; i <= 3; i++ {
-			issue, _ := st.Get(fmt.Sprintf("issue-%d", i))
-			if issue.Phase != state.PhaseHumanReview {
+			issue, _ := repo.Get(ctx, fmt.Sprintf("issue-%d", i))
+			if issue.Phase != constants.PhaseHumanReview {
 				allDone = false
 				break
 			}
@@ -204,19 +194,17 @@ func TestConcurrentIssues(t *testing.T) {
 }
 
 func TestBuildIssuePrompt(t *testing.T) {
-	orch := &Orchestrator{}
-
-	issue := &state.IssueState{
+	issue := &models.Issue{
 		Title:       "Fix login",
 		Description: "Login is broken",
 	}
-	got := orch.buildIssuePrompt(issue)
+	got := buildIssuePrompt(issue)
 	if got != "# Issue: Fix login\n\nLogin is broken" {
 		t.Errorf("prompt without feedback =\n%q", got)
 	}
 
 	issue.LastFeedback = "Add error handling"
-	got = orch.buildIssuePrompt(issue)
+	got = buildIssuePrompt(issue)
 	if !containsStr(got, "Previous human feedback") || !containsStr(got, "Add error handling") {
 		t.Errorf("prompt with feedback should include feedback:\n%q", got)
 	}
@@ -226,7 +214,6 @@ func TestShutdownDrainsQueue(t *testing.T) {
 	orch, _, _ := setupTestEnv(t)
 	orch.Start()
 
-	// Shutdown without enqueuing — should not hang
 	done := make(chan struct{})
 	go func() {
 		orch.Shutdown()

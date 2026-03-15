@@ -1,8 +1,9 @@
-// Package api provides HTTP handlers that wire the Electron frontend
+// Package api provides HTTP handlers that wire the frontend
 // to the backend by exposing REST endpoints for Kanban board operations.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,27 +11,30 @@ import (
 	"time"
 
 	"auto-issue/internal/config"
-	"auto-issue/internal/orchestrator"
-	"auto-issue/internal/state"
+	"auto-issue/internal/constants"
+	"auto-issue/internal/models"
+	"auto-issue/internal/repository"
+	"auto-issue/internal/service"
 )
 
-// Handler serves the auto-issue REST API, delegating to the state store
+// Handler serves the auto-issue REST API, delegating to the repository
 // and orchestrator for issue lifecycle management.
 type Handler struct {
-	state        *state.Store
-	orchestrator *orchestrator.Orchestrator
-	config       *config.Config
-	startTime    time.Time
+	issues     repository.IssueRepository
+	configRepo repository.ConfigRepository
+	orch       *service.Orchestrator
+	config     *config.Config
+	startTime  time.Time
 }
 
-// NewHandler creates a Handler wired to the given state store, orchestrator,
-// and configuration. The handler's uptime is measured from creation time.
-func NewHandler(st *state.Store, orch *orchestrator.Orchestrator, cfg *config.Config) *Handler {
+// NewHandler creates a Handler wired to the given dependencies.
+func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigRepository, orch *service.Orchestrator, cfg *config.Config) *Handler {
 	return &Handler{
-		state:        st,
-		orchestrator: orch,
-		config:       cfg,
-		startTime:    time.Now(),
+		issues:     issues,
+		configRepo: configRepo,
+		orch:       orch,
+		config:     cfg,
+		startTime:  time.Now(),
 	}
 }
 
@@ -49,10 +53,10 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issues := h.state.List("")
+	issues, _ := h.issues.List(r.Context(), "")
 	active := 0
 	for _, issue := range issues {
-		if issue.Phase == state.PhaseDeveloping || issue.Phase == state.PhaseCodeReviewing {
+		if issue.Phase == constants.PhaseDeveloping || issue.Phase == constants.PhaseCodeReviewing {
 			active++
 		}
 	}
@@ -76,10 +80,10 @@ func (h *Handler) handleIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
-	phaseFilter := state.Phase(r.URL.Query().Get("phase"))
-	issues := h.state.List(phaseFilter)
+	phaseFilter := r.URL.Query().Get("phase")
+	issues, _ := h.issues.List(r.Context(), phaseFilter)
 	if issues == nil {
-		issues = []*state.IssueState{}
+		issues = []*models.Issue{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": issues,
@@ -104,7 +108,7 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := fmt.Sprintf("issue-%d", time.Now().UnixMilli())
-	issue, err := h.state.Create(id, req.Title, req.Description, req.RepoPath)
+	issue, err := h.issues.Create(r.Context(), id, req.Title, req.Description, req.RepoPath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -145,7 +149,7 @@ func (h *Handler) getIssue(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	issue, err := h.state.Get(id)
+	issue, err := h.issues.Get(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
@@ -168,15 +172,17 @@ func (h *Handler) moveIssue(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
+	ctx := r.Context()
+
 	switch req.To {
 	case "in_progress":
-		if err := h.state.Transition(id, state.PhaseDeveloping); err != nil {
+		if err := h.issues.Transition(ctx, id, constants.PhaseDeveloping); err != nil {
 			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
 			return
 		}
-		h.orchestrator.Enqueue(id)
+		h.orch.Enqueue(id)
 
-		issue, err := h.state.Get(id)
+		issue, err := h.issues.Get(ctx, id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", fmt.Errorf("fetching issue after transition: %w", err).Error())
 			return
@@ -188,12 +194,12 @@ func (h *Handler) moveIssue(w http.ResponseWriter, r *http.Request, id string) {
 		})
 
 	case "done":
-		if err := h.state.Transition(id, state.PhaseDone); err != nil {
+		if err := h.issues.Transition(ctx, id, constants.PhaseDone); err != nil {
 			writeError(w, http.StatusConflict, "invalid_transition", err.Error())
 			return
 		}
 
-		issue, err := h.state.Get(id)
+		issue, err := h.issues.Get(ctx, id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", fmt.Errorf("fetching issue after transition: %w", err).Error())
 			return
@@ -228,7 +234,9 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	if err := h.state.SetFeedback(id, req.Feedback, h.config.Agent.MaxIterations); err != nil {
+	ctx := r.Context()
+
+	if err := h.issues.SetFeedback(ctx, id, req.Feedback, h.config.Agent.MaxIterations); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "not_found", err.Error())
 		} else {
@@ -237,15 +245,14 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	issue, err := h.state.Get(id)
+	issue, err := h.issues.Get(ctx, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Errorf("fetching issue after feedback: %w", err).Error())
 		return
 	}
 
-	// If the issue went back to developing (not failed), enqueue it.
-	if issue.Phase == state.PhaseDeveloping {
-		h.orchestrator.Enqueue(issue.IssueID)
+	if issue.Phase == constants.PhaseDeveloping {
+		h.orch.Enqueue(issue.IssueID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -270,7 +277,7 @@ func (h *Handler) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cfg, err := h.configRepo.Load(context.Background())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "config_error", err.Error())
 		return
@@ -283,7 +290,6 @@ func (h *Handler) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeJSON encodes data as JSON and writes it with the given status code.
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -292,7 +298,6 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	}
 }
 
-// writeError writes a structured error response per the API.md spec.
 func writeError(w http.ResponseWriter, status int, code string, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -305,7 +310,6 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 	}
 }
 
-// readJSON decodes the request body into dest.
 func readJSON(r *http.Request, dest any) error {
 	if r.Body == nil {
 		return fmt.Errorf("request body is empty")

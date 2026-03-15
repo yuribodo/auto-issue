@@ -10,23 +10,36 @@ Build a local Go backend (HTTP API server) embedded within an Electron app. The 
 ```
 backend/
 ├── cmd/
-│   └── main.go                 # Entry point: load config, wire components, start API server
+│   └── server/
+│       └── main.go                # Entry point: connect DB, run migrations, wire components, start API
 ├── internal/
-│   ├── config/
-│   │   └── config.go           # Parse config.json, define Config struct
 │   ├── api/
-│   │   └── handler.go          # HTTP handlers: PUT /issues/{id}/move, GET /issues, etc.
-│   ├── workspace/
-│   │   └── manager.go          # Create/destroy per-issue workspace directories
+│   │   └── handler.go             # HTTP handlers: PUT /issues/{id}/move, GET /issues, etc.
+│   ├── constants/
+│   │   └── phases.go              # Phase constants + transition rules
+│   ├── config/
+│   │   └── config.go              # Config struct, defaults, validation
+│   ├── db/
+│   │   ├── db.go                  # PostgreSQL connection via GORM
+│   │   └── migration.go           # AutoMigrate for all models
+│   ├── models/
+│   │   ├── issue.go               # GORM model for issues table
+│   │   └── config.go              # GORM model for config table (singleton)
+│   ├── repository/
+│   │   ├── issue_repository.go    # IssueRepository interface + PG implementation
+│   │   ├── memory_issue_repository.go  # In-memory implementation for tests
+│   │   └── config_repository.go   # ConfigRepository interface + PG implementation
+│   ├── service/
+│   │   └── orchestrator.go        # Issue processing: develop → code review → move to human_review
 │   ├── agent/
-│   │   └── runner.go           # Spawn Claude Code subprocess, capture output, enforce timeout
-│   ├── state/
-│   │   └── state.go            # In-memory state + JSON file persistence
-│   └── orchestrator/
-│       └── orchestrator.go     # Issue processing: develop → code review → move to human_review
+│   │   └── runner.go              # Spawn Claude Code subprocess, capture output, enforce timeout
+│   └── workspace/
+│       └── manager.go             # Create/destroy per-issue workspace directories
+├── docker-compose.yml             # PostgreSQL + app containers
+├── Dockerfile                     # Multi-stage Go build
+├── .env.example                   # Environment variable template
 ├── go.mod
-├── go.sum
-└── config.example.json         # Example configuration
+└── go.sum
 ```
 
 ---
@@ -34,7 +47,7 @@ backend/
 ## Component Breakdown
 
 ### 1. `config/config.go`
-Parse `~/.auto-issue/config.json` into a `Config` struct.
+Define the `Config` struct with defaults. Config is stored in PostgreSQL (singleton row in `config` table) and loaded via `ConfigRepository`.
 
 ```go
 type Config struct {
@@ -57,11 +70,56 @@ type WorkspaceConfig struct {
 }
 ```
 
-Config is loaded at startup and can be reloaded via API endpoint.
+On first startup, if no config exists in the database, defaults are seeded automatically. Config can be reloaded from the database via API endpoint.
 
 ---
 
-### 2. `api/handler.go`
+### 2. `constants/phases.go`
+Shared domain constants for the issue lifecycle phases and transition validation logic.
+
+```go
+const (
+  PhaseBacklog       = "backlog"
+  PhaseDeveloping    = "developing"
+  PhaseCodeReviewing = "code_reviewing"
+  PhaseHumanReview   = "human_review"
+  PhaseDone          = "done"
+  PhaseFailed        = "failed"
+)
+
+func IsValidTransition(from, to string) bool
+```
+
+---
+
+### 3. `db/db.go` + `db/migration.go`
+Database connection and schema management.
+
+- `OpenConnection()` — connects to PostgreSQL using `DATABASE_URL` env var, or falls back to individual `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`, `DB_TIMEZONE` env vars.
+- `RunMigration(db)` — runs GORM AutoMigrate for `Issue` and `Config` models.
+
+---
+
+### 4. `models/issue.go` + `models/config.go`
+GORM models mapped to PostgreSQL tables.
+
+- `Issue` — stores issue state, phase, agent output, feedback, iteration count, timestamps.
+- `Config` — singleton row (`id = 1`) storing all application configuration.
+
+---
+
+### 5. `repository/`
+Data access layer following the repository pattern.
+
+- `IssueRepository` interface — `Create`, `Get`, `List`, `Transition`, `SetFeedback`, `StartDeveloping`, `UpdateOutput`.
+- `PGIssueRepository` — PostgreSQL implementation using GORM with `SELECT ... FOR UPDATE` for safe concurrent transitions.
+- `MemoryIssueRepository` — in-memory implementation for unit tests.
+- `ConfigRepository` interface — `Load`, `Save`.
+- `PGConfigRepository` — PostgreSQL implementation.
+
+---
+
+### 6. `api/handler.go`
 HTTP request handlers for the API server. The Electron frontend communicates with these endpoints.
 
 **Key handlers:**
@@ -72,13 +130,13 @@ HTTP request handlers for the API server. The Electron frontend communicates wit
 - `PUT /api/v1/issues/{id}/move` — move issue to new phase (triggers agent when moving to `in_progress`)
 - `POST /api/v1/issues/{id}/feedback` — submit human feedback (triggers re-run)
 - `GET /api/v1/config` — get current configuration
-- `POST /api/v1/config/reload` — reload config from disk
+- `POST /api/v1/config/reload` — reload config from database
 
-Handlers validate requests, enqueue work, and return JSON responses.
+Handlers accept `IssueRepository` and `ConfigRepository` interfaces for testability.
 
 ---
 
-### 3. `workspace/manager.go`
+### 7. `workspace/manager.go`
 Manages isolated directories per issue.
 
 - `Create(issueID string, repoPath string) (string, error)` — creates `{base_path}/{issueID}/`, initializes with repo contents
@@ -89,7 +147,7 @@ Workspaces are preserved across restarts (idempotent creation). The repo source 
 
 ---
 
-### 4. `agent/runner.go`
+### 8. `agent/runner.go`
 Executes Claude Code locally as a subprocess within the issue's workspace.
 
 ```go
@@ -107,43 +165,77 @@ func Run(ctx context.Context, cfg AgentConfig, workspacePath string, mode string
 - Sets working directory to `workspacePath`
 - Captures stdout/stderr combined
 - Enforces `cfg.Timeout` via context deadline
-- Returns combined output (stored in state, returned to frontend)
+- Returns combined output (stored in database, returned to frontend)
 
 ---
 
-### 5. `state/state.go`
-Tracks execution state per issue. No external DB.
+### 9. `service/orchestrator.go`
+Issue processing orchestration (business logic layer).
 
 ```go
-type Phase string
-const (
-  PhaseBacklog        Phase = "backlog"
-  PhaseDeveloping     Phase = "developing"
-  PhaseCodeReviewing  Phase = "code_reviewing"
-  PhaseHumanReview    Phase = "human_review"
-  PhaseDone           Phase = "done"
-  PhaseFailed         Phase = "failed"
-)
-```
-
-```go
-type IssueState struct {
-  IssueID        string
-  Title          string
-  Description    string           // issue/card requirements
-  Phase          Phase
-  Iteration      int              // feedback iteration count (max 3)
-  WorkspacePath  string
-  RepoPath       string           // local repo path
-  StartedAt      time.Time
-  LastFeedback   string           // human's feedback text
-  FeedbackCount  int              // how many times human rejected
-  LastOutput     string           // last agent output
-  AgentLogs      string           // agent execution logs
+type Orchestrator struct {
+  workspace *workspace.Manager
+  issues    repository.IssueRepository
+  agent     *agent.Runner
+  queue     chan IssueRequest      // buffered work queue
+  sem       chan struct{}          // semaphore for max concurrency
 }
 ```
 
-**State Machine Flow:**
+**API handlers enqueue issues:**
+- `PUT /issues/{id}/move` with `{"to": "in_progress"}` → enqueue with phase `developing`
+- `POST /issues/{id}/feedback` (human feedback) → enqueue with phase `developing` + feedback injected
+
+**Worker goroutines (N = max_concurrency):**
+```
+1. Dequeue issue request
+2. Load or create workspace (clone/copy local repo into workspace)
+3. Phase = developing:
+   a. Build prompt with issue title + description + any previous feedback
+   b. Run Claude Code locally in development mode
+   c. Store output in database
+   d. Set phase = code_reviewing
+4. Phase = code_reviewing:
+   a. Build prompt: "Review the solution you just implemented for this issue"
+   b. Run same Claude Code agent in code-review mode
+   c. Store review output in database
+   d. Set phase = human_review
+5. Electron frontend polls and sees phase = human_review → moves card to Human Review column
+```
+
+**Agent modes:**
+- `developing`: solve the issue, implement the feature/fix
+- `code_reviewing`: review own solution, find issues, suggest improvements (if review finds problems, agent fixes them in-place before completing)
+
+**Feedback injection:**
+When agent reruns with feedback, prompt includes:
+```
+Previous human feedback:
+"{{ LastFeedback }}"
+
+Please make these adjustments and resubmit for review.
+```
+
+**Iteration limits:** max 3 feedback cycles before stopping (auto-fails if exceeded)
+
+**Graceful shutdown:** catch `SIGTERM`/`SIGINT`, drain queue, wait for active agents to finish or timeout.
+
+---
+
+### 10. `cmd/server/main.go`
+Entry point:
+1. Connect to PostgreSQL via `db.OpenConnection()`
+2. Run migrations via `db.RunMigration()`
+3. Initialize repositories (`PGIssueRepository`, `PGConfigRepository`)
+4. Load config from database (seed defaults on first run)
+5. Initialize workspace manager, agent runner, orchestrator
+6. Start HTTP API server on configured port
+7. Handle OS signals for graceful shutdown
+
+---
+
+## State Machine Flow
+
 ```
 PhaseBacklog
     ↓ [User drags card to "In Progress" in Electron Kanban]
@@ -170,79 +262,7 @@ PhaseHumanReview (Human Review column — card auto-moves)
 - Agent goes through the full cycle again: develop → code review → human review
 - If the user approves instead, Electron sends `PUT /issues/{id}/move` with `{"to": "done"}` and card moves to Done
 
-- In-memory `map[string]*IssueState` protected by `sync.RWMutex`
-- Persisted to `~/.auto-issue/state.json` after each mutation
-- On startup: load from file, resume in-progress issues or skip done ones
-- Prevents duplicate dispatches via phase check before queueing
-
----
-
-### 6. `orchestrator/orchestrator.go`
-Issue processing orchestration.
-
-```go
-type Orchestrator struct {
-  workspace *workspace.Manager
-  state     *state.Store
-  agent     *agent.Runner
-  queue     chan IssueRequest      // buffered work queue
-  sem       chan struct{}          // semaphore for max concurrency
-}
-```
-
-**API handlers enqueue issues:**
-- `PUT /issues/{id}/move` with `{"to": "in_progress"}` → enqueue with phase `developing`
-- `POST /issues/{id}/feedback` (human feedback) → enqueue with phase `developing` + feedback injected
-
-**Worker goroutines (N = max_concurrency):**
-```
-1. Dequeue issue request
-2. Load or create workspace (clone/copy local repo into workspace)
-3. Phase = developing:
-   a. Build prompt with issue title + description + any previous feedback
-   b. Run Claude Code locally in development mode
-   c. Store output in state
-   d. Set phase = code_reviewing
-4. Phase = code_reviewing:
-   a. Build prompt: "Review the solution you just implemented for this issue"
-   b. Run same Claude Code agent in code-review mode
-   c. Store review output in state
-   d. Set phase = human_review
-5. Persist state to JSON file
-6. Electron frontend polls and sees phase = human_review → moves card to Human Review column
-```
-
-**Agent modes:**
-- `developing`: solve the issue, implement the feature/fix
-- `code_reviewing`: review own solution, find issues, suggest improvements (if review finds problems, agent fixes them in-place before completing)
-
-**Feedback injection:**
-When agent reruns with feedback, prompt includes:
-```
-Previous human feedback:
-"{{ LastFeedback }}"
-
-Please make these adjustments and resubmit for review.
-```
-
-**Iteration limits:** max 3 feedback cycles before stopping (auto-fails if exceeded)
-
-**Graceful shutdown:** catch `SIGTERM`/`SIGINT`, drain queue, wait for active agents to finish or timeout.
-
----
-
-### 7. `cmd/main.go`
-Entry point:
-1. Load config from `~/.auto-issue/config.json`
-2. Initialize components (state, workspace, orchestrator)
-3. Start HTTP API server on configured port
-4. Start worker pool (consumer goroutines)
-5. Handle OS signals for graceful shutdown
-
-**API server initialization:**
-- Bind to `localhost:{api_port}`
-- Register HTTP handlers (see api/handler.go)
-- Health check endpoint
+**Persistence:** All issue state and config are stored in PostgreSQL. Concurrent access is handled by GORM transactions with `SELECT ... FOR UPDATE`. Duplicate dispatches are prevented via phase check before queueing.
 
 ---
 
@@ -279,45 +299,45 @@ Entry point:
 ---
 
 ## Key Dependencies
-- `encoding/json` — config parsing (stdlib)
-- Standard library only for everything else (goroutines, channels, os/exec, slog, net/http)
+- `gorm.io/gorm` — ORM for PostgreSQL
+- `gorm.io/driver/postgres` — PostgreSQL driver for GORM
+- Standard library for everything else (goroutines, channels, os/exec, slog, net/http)
 
 ---
 
-## Example config.json Configuration
+## Running the Application
 
-```json
-{
-  "api_port": 8080,
-  "max_concurrency": 5,
-  "agent": {
-    "type": "claude-code",
-    "model": "claude-opus-4-6",
-    "timeout": "20m",
-    "max_iterations": 3,
-    "prompt": "Solve this issue step by step. Write clean, testable code."
-  },
-  "workspace": {
-    "base_path": "~/.auto-issue/workspaces"
-  }
-}
+```bash
+cd backend
+
+# 1. Copy and configure environment variables
+cp .env.example .env
+
+# 2. Start PostgreSQL and the app
+docker-compose up --build
 ```
+
+The app connects to PostgreSQL, runs migrations automatically, seeds default config if needed, and starts the API on port `8080`.
 
 ---
 
 ## Implementation Order
-1. `config/config.go` — parse config
-2. `state/state.go` — state store
-3. `workspace/manager.go` — workspace management
-4. `agent/runner.go` — Claude Code subprocess execution
-5. `orchestrator/orchestrator.go` — develop → review → human_review pipeline
-6. `api/handler.go` — HTTP handlers
-7. `cmd/main.go` — wire everything together
+1. `models/` — GORM models (Issue, Config)
+2. `constants/phases.go` — phase constants + transition rules
+3. `db/` — database connection + migration
+4. `repository/` — data access layer (issue + config repositories)
+5. `config/config.go` — config struct + defaults
+6. `workspace/manager.go` — workspace management
+7. `agent/runner.go` — Claude Code subprocess execution
+8. `service/orchestrator.go` — develop → review → human_review pipeline
+9. `api/handler.go` — HTTP handlers
+10. `cmd/server/main.go` — wire everything together
 
 ---
 
 ## Verification
-- Unit test: config parsing with sample config
-- Unit test: state transitions (backlog → developing → code_reviewing → human_review → done)
+- Unit test: config defaults and validation
+- Unit test: phase transitions (backlog → developing → code_reviewing → human_review → done)
+- Unit test: API handlers with in-memory repository
 - Integration test: mock agent runner, verify full orchestration flow
 - Manual: create issue in Electron, move to In Progress, verify Claude Code runs locally and card moves to Human Review

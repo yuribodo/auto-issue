@@ -1,43 +1,51 @@
 // Package main is the entry point for the auto-issue backend server.
-// It loads configuration, initializes all components, and starts the HTTP API.
+// It connects to PostgreSQL, runs migrations, initializes all components,
+// and starts the HTTP API.
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"auto-issue/internal/agent"
 	"auto-issue/internal/api"
 	"auto-issue/internal/config"
-	"auto-issue/internal/orchestrator"
-	"auto-issue/internal/state"
+	"auto-issue/internal/db"
+	"auto-issue/internal/repository"
+	"auto-issue/internal/service"
 	"auto-issue/internal/workspace"
 )
 
 func main() {
-	// Load config
-	cfg, err := config.Load(config.DefaultConfigPath())
+	// Connect to PostgreSQL
+	database, err := db.OpenConnection()
 	if err != nil {
-		slog.Error("loading config", "error", err)
+		slog.Error("connecting to database", "error", err)
 		os.Exit(1)
 	}
 
-	// Initialize state store
-	home, err := os.UserHomeDir()
+	// Run migrations
+	db.RunMigration(database)
+
+	// Initialize repositories
+	issueRepo := repository.NewPGIssueRepository(database)
+	configRepo := repository.NewPGConfigRepository(database)
+
+	// Load config from database (seed defaults on first run)
+	ctx := context.Background()
+	cfg, err := configRepo.Load(ctx)
 	if err != nil {
-		slog.Error("resolving home directory", "error", err)
-		os.Exit(1)
-	}
-	statePath := filepath.Join(home, ".auto-issue", "state.json")
-	st, err := state.NewStore(statePath)
-	if err != nil {
-		slog.Error("initializing state store", "error", err)
-		os.Exit(1)
+		slog.Warn("no config in database, seeding defaults")
+		cfg = config.Default()
+		if err := configRepo.Save(ctx, cfg); err != nil {
+			slog.Error("saving default config to database", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Initialize workspace manager
@@ -49,11 +57,11 @@ func main() {
 
 	// Initialize agent runner and orchestrator
 	ag := agent.NewRunner(cfg.Agent)
-	orch := orchestrator.New(wsMgr, st, ag, cfg.MaxConcurrency)
+	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, cfg.MaxConcurrency)
 	orch.Start()
 
 	// Set up HTTP server
-	handler := api.NewHandler(st, orch, cfg)
+	handler := api.NewHandler(issueRepo, configRepo, orch, cfg)
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 

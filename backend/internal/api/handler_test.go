@@ -11,8 +11,9 @@ import (
 
 	"auto-issue/internal/agent"
 	"auto-issue/internal/config"
-	"auto-issue/internal/orchestrator"
-	"auto-issue/internal/state"
+	"auto-issue/internal/constants"
+	"auto-issue/internal/repository"
+	"auto-issue/internal/service"
 	"auto-issue/internal/workspace"
 )
 
@@ -20,12 +21,8 @@ func setupTestHandler(t *testing.T) (*Handler, *http.ServeMux) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	statePath := filepath.Join(tmpDir, "state.json")
 
-	st, err := state.NewStore(statePath)
-	if err != nil {
-		t.Fatalf("creating store: %v", err)
-	}
+	issueRepo := repository.NewMemoryIssueRepository()
 
 	cfg := &config.Config{
 		APIPort:        8080,
@@ -51,10 +48,9 @@ func setupTestHandler(t *testing.T) (*Handler, *http.ServeMux) {
 	}
 
 	ag := agent.NewRunner(cfg.Agent)
-	orch := orchestrator.New(wsMgr, st, ag, cfg.MaxConcurrency)
-	// Don't call orch.Start() — Enqueue buffers into the channel (capacity 100).
+	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, cfg.MaxConcurrency)
 
-	h := NewHandler(st, orch, cfg)
+	h := NewHandler(issueRepo, nil, orch, cfg)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -110,10 +106,11 @@ func TestGetStatus(t *testing.T) {
 			name: "with active issues",
 			setupIssues: func(t *testing.T, h *Handler) {
 				t.Helper()
-				if _, err := h.state.Create("active-1", "Active", "desc", "/tmp"); err != nil {
+				ctx := t.Context()
+				if _, err := h.issues.Create(ctx, "active-1", "Active", "desc", "/tmp"); err != nil {
 					t.Fatalf("creating issue: %v", err)
 				}
-				if err := h.state.Transition("active-1", state.PhaseDeveloping); err != nil {
+				if err := h.issues.Transition(ctx, "active-1", constants.PhaseDeveloping); err != nil {
 					t.Fatalf("transitioning issue: %v", err)
 				}
 			},
@@ -214,11 +211,12 @@ func TestListIssues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, mux := setupTestHandler(t)
+			ctx := t.Context()
 
-			if _, err := h.state.Create("list-1", "Issue 1", "desc1", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(ctx, "list-1", "Issue 1", "desc1", "/tmp/repo"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
-			if _, err := h.state.Create("list-2", "Issue 2", "desc2", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(ctx, "list-2", "Issue 2", "desc2", "/tmp/repo"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
 
@@ -256,7 +254,7 @@ func TestGetIssue(t *testing.T) {
 			h, mux := setupTestHandler(t)
 
 			if tt.create {
-				if _, err := h.state.Create(tt.issueID, "Get me", "desc", "/tmp/repo"); err != nil {
+				if _, err := h.issues.Create(t.Context(), tt.issueID, "Get me", "desc", "/tmp/repo"); err != nil {
 					t.Fatalf("creating issue: %v", err)
 				}
 			}
@@ -296,15 +294,10 @@ func TestMoveIssue(t *testing.T) {
 			name: "human_review to done",
 			setupPhase: func(t *testing.T, h *Handler) {
 				t.Helper()
-				if err := h.state.Transition("move-test", state.PhaseDeveloping); err != nil {
-					t.Fatalf("transition: %v", err)
-				}
-				if err := h.state.Transition("move-test", state.PhaseCodeReviewing); err != nil {
-					t.Fatalf("transition: %v", err)
-				}
-				if err := h.state.Transition("move-test", state.PhaseHumanReview); err != nil {
-					t.Fatalf("transition: %v", err)
-				}
+				ctx := t.Context()
+				h.issues.Transition(ctx, "move-test", constants.PhaseDeveloping)
+				h.issues.Transition(ctx, "move-test", constants.PhaseCodeReviewing)
+				h.issues.Transition(ctx, "move-test", constants.PhaseHumanReview)
 			},
 			moveTo:    "done",
 			wantCode:  http.StatusOK,
@@ -330,7 +323,7 @@ func TestMoveIssue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h, mux := setupTestHandler(t)
 
-			if _, err := h.state.Create("move-test", "Move me", "desc", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(t.Context(), "move-test", "Move me", "desc", "/tmp/repo"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
 			tt.setupPhase(t, h)
@@ -362,7 +355,7 @@ func TestMoveIssue(t *testing.T) {
 func TestFeedback(t *testing.T) {
 	tests := []struct {
 		name       string
-		startPhase state.Phase
+		startPhase string
 		feedback   string
 		wantCode   int
 		wantPhase  string
@@ -370,21 +363,21 @@ func TestFeedback(t *testing.T) {
 	}{
 		{
 			name:       "valid feedback from human_review",
-			startPhase: state.PhaseHumanReview,
+			startPhase: constants.PhaseHumanReview,
 			feedback:   "Please refactor",
 			wantCode:   http.StatusOK,
 			wantPhase:  "developing",
 		},
 		{
 			name:       "feedback on wrong phase",
-			startPhase: state.PhaseBacklog,
+			startPhase: constants.PhaseBacklog,
 			feedback:   "This shouldn't work",
 			wantCode:   http.StatusConflict,
 			wantErrKey: "invalid_phase",
 		},
 		{
 			name:       "empty feedback",
-			startPhase: state.PhaseHumanReview,
+			startPhase: constants.PhaseHumanReview,
 			feedback:   "",
 			wantCode:   http.StatusBadRequest,
 			wantErrKey: "invalid_request",
@@ -394,15 +387,15 @@ func TestFeedback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, mux := setupTestHandler(t)
+			ctx := t.Context()
 
-			if _, err := h.state.Create("fb-test", "Feedback issue", "desc", "/tmp/repo"); err != nil {
+			if _, err := h.issues.Create(ctx, "fb-test", "Feedback issue", "desc", "/tmp/repo"); err != nil {
 				t.Fatalf("creating issue: %v", err)
 			}
 
-			// Walk to the desired start phase.
 			phases := phasePath(tt.startPhase)
 			for _, p := range phases {
-				if err := h.state.Transition("fb-test", p); err != nil {
+				if err := h.issues.Transition(ctx, "fb-test", p); err != nil {
 					t.Fatalf("transitioning to %s: %v", p, err)
 				}
 			}
@@ -453,18 +446,17 @@ func TestGetConfig(t *testing.T) {
 	}
 }
 
-// phasePath returns the sequence of transitions needed to reach the target
-// phase from backlog.
-func phasePath(target state.Phase) []state.Phase {
+// phasePath returns the sequence of transitions needed to reach the target phase from backlog.
+func phasePath(target string) []string {
 	switch target {
-	case state.PhaseBacklog:
+	case constants.PhaseBacklog:
 		return nil
-	case state.PhaseDeveloping:
-		return []state.Phase{state.PhaseDeveloping}
-	case state.PhaseCodeReviewing:
-		return []state.Phase{state.PhaseDeveloping, state.PhaseCodeReviewing}
-	case state.PhaseHumanReview:
-		return []state.Phase{state.PhaseDeveloping, state.PhaseCodeReviewing, state.PhaseHumanReview}
+	case constants.PhaseDeveloping:
+		return []string{constants.PhaseDeveloping}
+	case constants.PhaseCodeReviewing:
+		return []string{constants.PhaseDeveloping, constants.PhaseCodeReviewing}
+	case constants.PhaseHumanReview:
+		return []string{constants.PhaseDeveloping, constants.PhaseCodeReviewing, constants.PhaseHumanReview}
 	default:
 		return nil
 	}

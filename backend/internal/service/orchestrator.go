@@ -1,4 +1,5 @@
-package orchestrator
+// Package service contains business logic for the auto-issue application.
+package service
 
 import (
 	"context"
@@ -7,17 +8,22 @@ import (
 	"sync"
 
 	"auto-issue/internal/agent"
-	"auto-issue/internal/state"
+	"auto-issue/internal/constants"
+	"auto-issue/internal/models"
+	"auto-issue/internal/repository"
 	"auto-issue/internal/workspace"
 )
 
+// IssueRequest represents an issue enqueued for processing.
 type IssueRequest struct {
 	IssueID string
 }
 
+// Orchestrator coordinates the issue lifecycle by dispatching work
+// to the agent runner and managing phase transitions.
 type Orchestrator struct {
 	workspace *workspace.Manager
-	state     *state.Store
+	issues    repository.IssueRepository
 	agent     *agent.Runner
 	queue     chan IssueRequest
 	sem       chan struct{} // concurrency limiter
@@ -26,11 +32,12 @@ type Orchestrator struct {
 	cancel    context.CancelFunc
 }
 
-func New(ws *workspace.Manager, st *state.Store, ag *agent.Runner, maxConcurrency int) *Orchestrator {
+// NewOrchestrator creates an Orchestrator wired to the given dependencies.
+func NewOrchestrator(ws *workspace.Manager, issues repository.IssueRepository, ag *agent.Runner, maxConcurrency int) *Orchestrator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Orchestrator{
 		workspace: ws,
-		state:     st,
+		issues:    issues,
 		agent:     ag,
 		queue:     make(chan IssueRequest, 100),
 		sem:       make(chan struct{}, maxConcurrency),
@@ -77,42 +84,42 @@ func (o *Orchestrator) consumeLoop() {
 }
 
 func (o *Orchestrator) processIssue(issueID string) error {
-	issue, err := o.state.Get(issueID)
+	issue, err := o.issues.Get(o.ctx, issueID)
 	if err != nil {
 		return fmt.Errorf("getting issue: %w", err)
 	}
 
-	if issue.Phase != state.PhaseDeveloping {
+	if issue.Phase != constants.PhaseDeveloping {
 		return fmt.Errorf("issue %s is in phase %s, expected developing", issueID, issue.Phase)
 	}
 
 	// Step 1: Create or reuse workspace
 	wsPath, err := o.workspace.Create(issueID, issue.RepoPath)
 	if err != nil {
-		o.state.Transition(issueID, state.PhaseFailed)
+		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
 		return fmt.Errorf("creating workspace: %w", err)
 	}
 
-	if err := o.state.StartDeveloping(issueID, wsPath); err != nil {
+	if err := o.issues.StartDeveloping(o.ctx, issueID, wsPath); err != nil {
 		return fmt.Errorf("starting development: %w", err)
 	}
 
 	// Step 2: Build prompt with issue context + any feedback
-	prompt := o.buildIssuePrompt(issue)
+	prompt := buildIssuePrompt(issue)
 
 	// Step 3: Run agent in developing mode
 	slog.Info("starting development", "issue", issueID, "iteration", issue.Iteration)
 	devResult, err := o.agent.Run(o.ctx, wsPath, "developing", prompt)
 	if err != nil {
-		o.state.UpdateOutput(issueID, devResult.Output, err.Error())
-		o.state.Transition(issueID, state.PhaseFailed)
+		o.issues.UpdateOutput(o.ctx, issueID, devResult.Output, err.Error())
+		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
 		return fmt.Errorf("development run: %w", err)
 	}
 
-	o.state.UpdateOutput(issueID, devResult.Output, fmt.Sprintf("Development completed in %s", devResult.Duration))
+	o.issues.UpdateOutput(o.ctx, issueID, devResult.Output, fmt.Sprintf("Development completed in %s", devResult.Duration))
 
 	// Step 4: Transition to code reviewing
-	if err := o.state.Transition(issueID, state.PhaseCodeReviewing); err != nil {
+	if err := o.issues.Transition(o.ctx, issueID, constants.PhaseCodeReviewing); err != nil {
 		return fmt.Errorf("transition to code_reviewing: %w", err)
 	}
 
@@ -120,18 +127,18 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	slog.Info("starting code review", "issue", issueID)
 	reviewResult, err := o.agent.Run(o.ctx, wsPath, "code_reviewing", prompt)
 	if err != nil {
-		o.state.UpdateOutput(issueID, reviewResult.Output, err.Error())
-		o.state.Transition(issueID, state.PhaseFailed)
+		o.issues.UpdateOutput(o.ctx, issueID, reviewResult.Output, err.Error())
+		o.issues.Transition(o.ctx, issueID, constants.PhaseFailed)
 		return fmt.Errorf("code review run: %w", err)
 	}
 
 	// Append review output to existing output
 	combinedOutput := devResult.Output + "\n\n---\n\n# Code Review\n\n" + reviewResult.Output
 	combinedLogs := fmt.Sprintf("Development: %s\nCode Review: %s", devResult.Duration, reviewResult.Duration)
-	o.state.UpdateOutput(issueID, combinedOutput, combinedLogs)
+	o.issues.UpdateOutput(o.ctx, issueID, combinedOutput, combinedLogs)
 
 	// Step 6: Move to human review
-	if err := o.state.Transition(issueID, state.PhaseHumanReview); err != nil {
+	if err := o.issues.Transition(o.ctx, issueID, constants.PhaseHumanReview); err != nil {
 		return fmt.Errorf("transition to human_review: %w", err)
 	}
 
@@ -139,7 +146,7 @@ func (o *Orchestrator) processIssue(issueID string) error {
 	return nil
 }
 
-func (o *Orchestrator) buildIssuePrompt(issue *state.IssueState) string {
+func buildIssuePrompt(issue *models.Issue) string {
 	prompt := fmt.Sprintf("# Issue: %s\n\n%s", issue.Title, issue.Description)
 
 	if issue.LastFeedback != "" {

@@ -1,6 +1,6 @@
 # Auto-Issue HTTP API
 
-The Go backend exposes a REST HTTP API on `localhost:8080` (port configurable via `api_port` in config). The Electron frontend communicates with this API to manage the Kanban board and trigger agent runs.
+The Go backend exposes a REST HTTP API on `localhost:8080` (port configurable via `api_port` in the database config). The Electron frontend communicates with this API to manage the Kanban board and trigger agent runs.
 
 **Base URL:** `http://localhost:8080/api/v1`
 
@@ -166,7 +166,7 @@ Moves issue back to `developing` (In Progress column) and reruns the full agent 
 ---
 
 ### `GET /config`
-Current parsed configuration.
+Current parsed configuration (loaded from database).
 
 **Response:**
 ```json
@@ -189,7 +189,7 @@ Current parsed configuration.
 ---
 
 ### `POST /config/reload`
-Force reload config from `~/.auto-issue/config.json`.
+Force reload config from the database.
 
 **Response:**
 ```json
@@ -240,17 +240,22 @@ SSE or WebSocket for real-time updates is not implemented in MVP. The Electron f
 
 ## Environment Variables (Backend)
 
+Configured via `.env` file (see `.env.example`):
+
 ```bash
-# Port for HTTP API (overrides config file)
-API_PORT=8080
+# PostgreSQL connection
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=auto_issue
+DB_PASSWORD=auto_issue
+DB_NAME=auto_issue
+DB_SSLMODE=disable
+DB_TIMEZONE=UTC
+
+# Alternative: single connection string (takes precedence over individual vars)
+# DATABASE_URL=host=localhost port=5432 user=auto_issue password=auto_issue dbname=auto_issue sslmode=disable
 
 # GitHub OAuth client credentials (for login flow)
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
-
-# Config file location (default: ~/.auto-issue/config.json)
-CONFIG_PATH=~/.auto-issue/config.json
-
-# Workspaces location (default: ~/.auto-issue/workspaces)
-WORKSPACES_PATH=~/.auto-issue/workspaces
 ```
