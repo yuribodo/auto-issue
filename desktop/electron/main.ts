@@ -358,7 +358,7 @@ app.whenReady().then(async () => {
   // Check if backend is available
   useBackend = await backendHealthCheck()
   if (useBackend) {
-    console.log('[main] Backend detected at', process.env.BACKEND_URL || 'http://localhost:8080')
+    console.log('[main] Backend detected at', process.env.BACKEND_URL)
     console.log('[main] Using backend for run management')
 
     // Subscribe to SSE for any currently running issues
