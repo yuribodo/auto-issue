@@ -290,8 +290,7 @@ function registerIpcHandlers() {
     return loadConfig()
   })
 
-  ipcMain.handle('config:save', async (_event, config: SettingsData) => {
-    const oldConfig = loadConfig()
+  ipcMain.handle('config:save', (_event, config: SettingsData) => {
     persistConfig(config)
     const token = getAuthToken()
     if (token) {
@@ -300,21 +299,6 @@ function registerIpcHandlers() {
         intervalSeconds: config.polling_interval || 5,
         monitoredRepos: config.monitored_repos || []
       }, token)
-    }
-
-    // Restart bundled backend if database_url changed
-    if (config.database_url && config.database_url !== oldConfig.database_url) {
-      killDaemon()
-      try {
-        const port = await spawnDaemon(config.database_url)
-        if (port > 0) {
-          setBackendUrl(`http://127.0.0.1:${port}`)
-          useBackend = true
-          console.log(`[main] Restarted bundled backend on port ${port}`)
-        }
-      } catch (err) {
-        console.error('[main] Failed to restart bundled backend:', err)
-      }
     }
   })
 
@@ -393,34 +377,30 @@ app.whenReady().then(async () => {
     }
   }
 
-  // If no external backend, try spawning the bundled one
-  if (!useBackend) {
-    const config = loadConfig()
-    if (config.database_url) {
-      try {
-        const port = await spawnDaemon(config.database_url)
-        if (port > 0) {
-          setBackendUrl(`http://127.0.0.1:${port}`)
-          useBackend = true
-          console.log(`[main] Bundled backend started on port ${port}`)
+  // Dev/self-hosted: spawn bundled backend if DATABASE_URL env var is set
+  if (!useBackend && process.env.DATABASE_URL) {
+    try {
+      const port = await spawnDaemon(process.env.DATABASE_URL)
+      if (port > 0) {
+        setBackendUrl(`http://127.0.0.1:${port}`)
+        useBackend = true
+        console.log(`[main] Bundled backend started on port ${port}`)
 
-          // Subscribe to SSE for running issues
-          try {
-            const user = await handleGetMe()
-            const runs = await backendListRuns(user?.login)
-            persistRuns(runs)
-            for (const run of runs) {
-              if (run.status === 'running') {
-                subscribeToRunEvents(run.id)
-              }
+        try {
+          const user = await handleGetMe()
+          const runs = await backendListRuns(user?.login)
+          persistRuns(runs)
+          for (const run of runs) {
+            if (run.status === 'running') {
+              subscribeToRunEvents(run.id)
             }
-          } catch (err) {
-            console.error('[main] Failed to list running issues:', err)
           }
+        } catch (err) {
+          console.error('[main] Failed to list running issues:', err)
         }
-      } catch (err) {
-        console.error('[main] Failed to start bundled backend:', err)
       }
+    } catch (err) {
+      console.error('[main] Failed to start bundled backend:', err)
     }
   }
 

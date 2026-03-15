@@ -80,8 +80,6 @@ export interface SettingsData {
   monitored_repos: string[]
   // Whether the GitHub poller is enabled. If omitted, defaults to true.
   polling_enabled?: boolean
-  // PostgreSQL connection string for bundled backend.
-  database_url?: string
 }
 
 export interface CreateRunParams {
