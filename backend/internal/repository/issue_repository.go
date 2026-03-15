@@ -14,10 +14,10 @@ import (
 
 // IssueRepository defines the data access contract for issues.
 type IssueRepository interface {
-	Create(ctx context.Context, id, title, description, repoPath string) (*models.Issue, error)
-	CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error)
+	Create(ctx context.Context, id, title, description, repoPath, githubUser string) (*models.Issue, error)
+	CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int, githubUser string) (*models.Issue, error)
 	Get(ctx context.Context, id string) (*models.Issue, error)
-	List(ctx context.Context, phaseFilter string) ([]*models.Issue, error)
+	List(ctx context.Context, phaseFilter, githubUser string) ([]*models.Issue, error)
 	Transition(ctx context.Context, id string, to string) error
 	SetFeedback(ctx context.Context, id string, feedback string, maxIterations int) error
 	StartDeveloping(ctx context.Context, id string, workspacePath string) error
@@ -39,9 +39,10 @@ func NewPGIssueRepository(db *gorm.DB) *PGIssueRepository {
 // Compile-time interface verification.
 var _ IssueRepository = (*PGIssueRepository)(nil)
 
-func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, repoPath string) (*models.Issue, error) {
+func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, repoPath, githubUser string) (*models.Issue, error) {
 	issue := models.Issue{
 		IssueID:     id,
+		GithubUser:  githubUser,
 		Title:       title,
 		Description: description,
 		RepoPath:    repoPath,
@@ -55,9 +56,10 @@ func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, 
 	return &issue, nil
 }
 
-func (r *PGIssueRepository) CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error) {
+func (r *PGIssueRepository) CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int, githubUser string) (*models.Issue, error) {
 	issue := models.Issue{
 		IssueID:     id,
+		GithubUser:  githubUser,
 		Title:       title,
 		Description: description,
 		RepoPath:    repoPath,
@@ -81,12 +83,15 @@ func (r *PGIssueRepository) Get(ctx context.Context, id string) (*models.Issue, 
 	return &issue, nil
 }
 
-func (r *PGIssueRepository) List(ctx context.Context, phaseFilter string) ([]*models.Issue, error) {
+func (r *PGIssueRepository) List(ctx context.Context, phaseFilter, githubUser string) ([]*models.Issue, error) {
 	var issues []*models.Issue
 
 	query := r.db.WithContext(ctx)
 	if phaseFilter != "" {
 		query = query.Where("phase = ?", phaseFilter)
+	}
+	if githubUser != "" {
+		query = query.Where("github_user = ?", githubUser)
 	}
 
 	if err := query.Find(&issues).Error; err != nil {

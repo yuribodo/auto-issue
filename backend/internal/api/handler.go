@@ -55,7 +55,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issues, _ := h.issues.List(r.Context(), "")
+	issues, _ := h.issues.List(r.Context(), "", "")
 	active := 0
 	for _, issue := range issues {
 		if issue.Phase == constants.PhaseDeveloping || issue.Phase == constants.PhaseCodeReviewing {
@@ -83,7 +83,8 @@ func (h *Handler) handleIssues(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listIssues(w http.ResponseWriter, r *http.Request) {
 	phaseFilter := r.URL.Query().Get("phase")
-	issues, _ := h.issues.List(r.Context(), phaseFilter)
+	githubUser := r.URL.Query().Get("github_user")
+	issues, _ := h.issues.List(r.Context(), phaseFilter, githubUser)
 	if issues == nil {
 		issues = []*models.Issue{}
 	}
@@ -100,6 +101,7 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		RepoPath    string `json:"repo_path"`
 		GithubRepo  string `json:"github_repo"`
 		IssueNumber int    `json:"issue_number"`
+		GithubUser  string `json:"github_user"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -111,14 +113,19 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.GithubUser == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "github_user is required")
+		return
+	}
+
 	id := fmt.Sprintf("issue-%d", time.Now().UnixMilli())
 
 	var issue *models.Issue
 	var err error
 	if req.GithubRepo != "" {
-		issue, err = h.issues.CreateWithGithub(r.Context(), id, req.Title, req.Description, req.RepoPath, req.GithubRepo, req.IssueNumber)
+		issue, err = h.issues.CreateWithGithub(r.Context(), id, req.Title, req.Description, req.RepoPath, req.GithubRepo, req.IssueNumber, req.GithubUser)
 	} else {
-		issue, err = h.issues.Create(r.Context(), id, req.Title, req.Description, req.RepoPath)
+		issue, err = h.issues.Create(r.Context(), id, req.Title, req.Description, req.RepoPath, req.GithubUser)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
