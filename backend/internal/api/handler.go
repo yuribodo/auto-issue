@@ -185,6 +185,8 @@ func (h *Handler) handleIssueByPath(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "move":
 		h.moveIssue(w, r, issueID)
+	case "transition":
+		h.transitionIssue(w, r, issueID)
 	case "feedback":
 		h.submitFeedback(w, r, issueID)
 	case "events":
@@ -193,6 +195,16 @@ func (h *Handler) handleIssueByPath(w http.ResponseWriter, r *http.Request) {
 		h.cancelIssue(w, r, issueID)
 	case "diff":
 		h.getDiff(w, r, issueID)
+	case "start-developing":
+		h.startDeveloping(w, r, issueID)
+	case "output":
+		h.updateOutput(w, r, issueID)
+	case "pr":
+		h.updatePR(w, r, issueID)
+	case "cost":
+		h.updateCost(w, r, issueID)
+	case "agent-info":
+		h.updateAgentInfo(w, r, issueID)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "unknown action: "+action)
 	}
@@ -327,7 +339,8 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 	}
 
 	var req struct {
-		Feedback string `json:"feedback"`
+		Feedback      string `json:"feedback"`
+		MaxIterations int    `json:"max_iterations"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -341,7 +354,16 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 
 	ctx := r.Context()
 
-	if err := h.issues.SetFeedback(ctx, id, req.Feedback, h.config.Agent.MaxIterations); err != nil {
+	// Use max_iterations from request if provided, otherwise fall back to config
+	maxIter := req.MaxIterations
+	if maxIter <= 0 && h.config != nil {
+		maxIter = h.config.Agent.MaxIterations
+	}
+	if maxIter <= 0 {
+		maxIter = 3 // sensible default
+	}
+
+	if err := h.issues.SetFeedback(ctx, id, req.Feedback, maxIter); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeError(w, http.StatusNotFound, "not_found", err.Error())
 		} else {
@@ -530,6 +552,143 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 			LinesRemoved: totalRemoved,
 		},
 	})
+}
+
+// transitionIssue handles direct phase transitions used by the agent runner's APIIssueRepository.
+// Unlike moveIssue which only supports "in_progress" and "done", this supports all valid transitions.
+func (h *Handler) transitionIssue(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
+		return
+	}
+
+	var req struct {
+		To string `json:"to"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := h.issues.Transition(r.Context(), id, req.To); err != nil {
+		writeError(w, http.StatusConflict, "invalid_transition", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) startDeveloping(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
+		return
+	}
+
+	var req struct {
+		WorkspacePath string `json:"workspace_path"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := h.issues.StartDeveloping(r.Context(), id, req.WorkspacePath); err != nil {
+		writeError(w, http.StatusConflict, "invalid_phase", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) updateOutput(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
+		return
+	}
+
+	var req struct {
+		Output string `json:"output"`
+		Logs   string `json:"logs"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := h.issues.UpdateOutput(r.Context(), id, req.Output, req.Logs); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) updatePR(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
+		return
+	}
+
+	var req struct {
+		PRURL string `json:"pr_url"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := h.issues.UpdatePR(r.Context(), id, req.PRURL); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) updateCost(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
+		return
+	}
+
+	var req struct {
+		CostUSD float64 `json:"cost_usd"`
+		Turns   int     `json:"turns"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := h.issues.UpdateCost(r.Context(), id, req.CostUSD, req.Turns); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h *Handler) updateAgentInfo(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
+		return
+	}
+
+	var req struct {
+		AgentType  string `json:"agent_type"`
+		AgentModel string `json:"agent_model"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := h.issues.UpdateAgentInfo(r.Context(), id, req.AgentType, req.AgentModel); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

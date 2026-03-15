@@ -46,7 +46,7 @@ import {
   setAuthTokenGetter,
   type SSEConnection,
 } from './backend-client'
-import { spawnDaemon, killDaemon } from './daemon'
+import { spawnDaemon, killDaemon, type DaemonOptions } from './daemon'
 import type { SSEEvent, SettingsData, CreateRunParams, Provider } from './shared-types'
 
 let mainWindow: BrowserWindow | null = null
@@ -383,52 +383,54 @@ app.whenReady().then(async () => {
   setBroadcast(broadcastEvent)
   setAuthTokenGetter(getAuthToken)
 
-  // Check if backend is available
-  useBackend = await backendHealthCheck()
-  if (useBackend) {
-    console.log('[main] Backend detected at', process.env.BACKEND_URL)
-    console.log('[main] Using backend for run management')
+  const remoteUrl = process.env.BACKEND_URL || 'https://auto-issue.onrender.com'
 
-    // Subscribe to SSE for any currently running issues
-    try {
-      const user = await handleGetMe()
-      const runs = await backendListRuns(user?.login)
-      // Cache locally to survive restarts
-      persistRuns(runs)
-      for (const run of runs) {
-        if (run.status === 'running') {
-          subscribeToRunEvents(run.id)
+  // Try to spawn the bundled Go binary in agent mode.
+  // It runs agents locally and forwards DB operations to the remote API.
+  const ghToken = getAuthToken() || ''
+  try {
+    const port = await spawnDaemon({ backendUrl: remoteUrl, ghToken })
+    if (port > 0) {
+      // Point the Electron renderer at the local binary
+      setBackendUrl(`http://127.0.0.1:${port}`)
+      useBackend = true
+      console.log(`[main] Local agent backend started on port ${port} (remote: ${remoteUrl})`)
+
+      try {
+        const user = await handleGetMe()
+        const runs = await backendListRuns(user?.login)
+        persistRuns(runs)
+        for (const run of runs) {
+          if (run.status === 'running') {
+            subscribeToRunEvents(run.id)
+          }
         }
+      } catch (err) {
+        console.error('[main] Failed to list running issues:', err)
       }
-    } catch (err) {
-      console.error('[main] Failed to list running issues:', err)
     }
+  } catch (err) {
+    console.error('[main] Failed to start local agent backend:', err)
   }
 
-  // Dev/self-hosted: spawn bundled backend if DATABASE_URL env var is set
-  if (!useBackend && process.env.DATABASE_URL) {
-    try {
-      const port = await spawnDaemon(process.env.DATABASE_URL)
-      if (port > 0) {
-        setBackendUrl(`http://127.0.0.1:${port}`)
-        useBackend = true
-        console.log(`[main] Bundled backend started on port ${port}`)
-
-        try {
-          const user = await handleGetMe()
-          const runs = await backendListRuns(user?.login)
-          persistRuns(runs)
-          for (const run of runs) {
-            if (run.status === 'running') {
-              subscribeToRunEvents(run.id)
-            }
+  // Fallback: try talking directly to the remote API (no local agent execution)
+  if (!useBackend) {
+    setBackendUrl(remoteUrl)
+    useBackend = await backendHealthCheck()
+    if (useBackend) {
+      console.log('[main] Using remote backend directly at', remoteUrl)
+      try {
+        const user = await handleGetMe()
+        const runs = await backendListRuns(user?.login)
+        persistRuns(runs)
+        for (const run of runs) {
+          if (run.status === 'running') {
+            subscribeToRunEvents(run.id)
           }
-        } catch (err) {
-          console.error('[main] Failed to list running issues:', err)
         }
+      } catch (err) {
+        console.error('[main] Failed to list running issues:', err)
       }
-    } catch (err) {
-      console.error('[main] Failed to start bundled backend:', err)
     }
   }
 

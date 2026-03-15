@@ -1,6 +1,8 @@
 // Package main is the entry point for the auto-issue backend server.
-// It connects to PostgreSQL, runs migrations, initializes all components,
-// and starts the HTTP API.
+// Supports two modes controlled by the MODE env var:
+//   - "api" (default): API-only server connected to PostgreSQL, no agent execution.
+//   - "agent": Local agent runner that talks to the remote API via HTTP,
+//     runs orchestrator/agents locally, and exposes the same HTTP endpoints.
 package main
 
 import (
@@ -22,22 +24,39 @@ import (
 )
 
 func main() {
-	// Connect to PostgreSQL
+	mode := os.Getenv("MODE")
+	if mode == "" {
+		mode = "api"
+	}
+
+	switch mode {
+	case "api":
+		runAPIMode()
+	case "agent":
+		runAgentMode()
+	default:
+		slog.Error("unknown MODE", "mode", mode)
+		os.Exit(1)
+	}
+}
+
+// runAPIMode starts the API-only server connected to PostgreSQL.
+// No orchestrator or agent execution — used on Render.
+func runAPIMode() {
+	slog.Info("starting in API mode (remote database, no agent execution)")
+
 	database, err := db.OpenConnection()
 	if err != nil {
 		slog.Error("connecting to database", "error", err)
 		os.Exit(1)
 	}
 
-	// Run migrations
 	db.RunMigration(database)
 
-	// Initialize repositories
 	issueRepo := repository.NewPGIssueRepository(database)
 	configRepo := repository.NewPGConfigRepository(database)
 
-	// Load config from database (seed defaults on first run)
-	ctx := context.Background()
+	ctx := newBackgroundCtx()
 	cfg, err := configRepo.Load(ctx)
 	if err != nil {
 		slog.Warn("no config in database, seeding defaults")
@@ -48,7 +67,24 @@ func main() {
 		}
 	}
 
-	// Read GH_TOKEN from environment
+	applyPortOverride(cfg)
+
+	// API mode: no orchestrator, no broadcaster
+	handler := api.NewHandler(issueRepo, configRepo, nil, cfg, nil)
+	startServer(handler, cfg.APIPort, nil)
+}
+
+// runAgentMode starts the local agent runner that talks to the remote API.
+// Runs orchestrator, workspace manager, and agents locally.
+func runAgentMode() {
+	slog.Info("starting in agent mode (remote API, local agent execution)")
+
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		slog.Error("BACKEND_URL is required in agent mode")
+		os.Exit(1)
+	}
+
 	ghToken := os.Getenv("GH_TOKEN")
 	if ghToken == "" {
 		ghToken = os.Getenv("GITHUB_TOKEN")
@@ -57,44 +93,47 @@ func main() {
 		slog.Info("GitHub token configured")
 	}
 
-	// Initialize workspace manager
+	// Use default config (no database to load from)
+	cfg := config.Default()
+	applyPortOverride(cfg)
+
+	// Create API-backed issue repository that forwards to the remote backend
+	issueRepo := repository.NewAPIIssueRepository(backendURL, ghToken)
+
+	// Initialize local workspace manager
 	wsMgr, err := workspace.NewManager(cfg.Workspace.BasePath)
 	if err != nil {
 		slog.Error("initializing workspace manager", "error", err)
 		os.Exit(1)
 	}
 
-	// Initialize broadcaster and orchestrator
+	// Initialize broadcaster and orchestrator (run agents locally)
 	broadcaster := api.NewBroadcaster()
 	orch := service.NewOrchestrator(wsMgr, issueRepo, cfg.Agent, cfg.Agent.APIKeys, broadcaster, ghToken, cfg.MaxConcurrency)
 	orch.Start()
 
-	// Allow PORT env var to override config (for bundled Electron usage)
-	if portStr := os.Getenv("PORT"); portStr != "" {
-		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
-			cfg.APIPort = p
-		}
-	}
+	// Serve the same API endpoints locally — Electron renderer talks to this
+	handler := api.NewHandler(issueRepo, nil, orch, cfg, broadcaster)
+	startServer(handler, cfg.APIPort, orch)
+}
 
-	// Set up HTTP server
-	handler := api.NewHandler(issueRepo, configRepo, orch, cfg, broadcaster)
+func startServer(handler *api.Handler, port int, orch *service.Orchestrator) {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
-
-	// Wrap with CORS middleware
 	corsHandler := api.CORSMiddleware(mux)
 
-	addr := fmt.Sprintf(":%d", cfg.APIPort)
+	addr := fmt.Sprintf(":%d", port)
 	srv := &http.Server{Addr: addr, Handler: corsHandler}
 
-	// Graceful shutdown on SIGINT/SIGTERM
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigCh
 		slog.Info("shutting down", "signal", sig)
-		orch.Shutdown()
+		if orch != nil {
+			orch.Shutdown()
+		}
 		srv.Close()
 	}()
 
@@ -103,4 +142,16 @@ func main() {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func applyPortOverride(cfg *config.Config) {
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p < 65536 {
+			cfg.APIPort = p
+		}
+	}
+}
+
+func newBackgroundCtx() context.Context {
+	return context.Background()
 }

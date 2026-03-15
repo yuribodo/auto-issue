@@ -1,7 +1,10 @@
 /**
  * Bundled Go backend process manager.
- * Spawns the auto-issue-backend binary as a child process, assigns a free port,
- * and polls /api/v1/status until the backend is healthy.
+ * Spawns the auto-issue-backend binary in agent mode as a child process,
+ * assigns a free port, and polls /api/v1/status until the backend is healthy.
+ *
+ * In agent mode, the binary talks to the remote Render API for DB operations
+ * and runs agents locally on the user's machine.
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process'
@@ -82,11 +85,19 @@ function waitForHealthy(port: number, timeoutMs = 15000): Promise<void> {
   })
 }
 
+export interface DaemonOptions {
+  /** URL of the remote API (Render) that the agent binary talks to for DB operations. */
+  backendUrl: string
+  /** GitHub OAuth token for the authenticated user. */
+  ghToken: string
+}
+
 /**
- * Spawns the bundled Go backend with the given DATABASE_URL.
- * Returns the port the backend is listening on.
+ * Spawns the bundled Go backend in agent mode.
+ * The binary talks to the remote API for DB operations and runs agents locally.
+ * Returns the port the local binary is listening on.
  */
-export async function spawnDaemon(databaseUrl: string): Promise<number> {
+export async function spawnDaemon(opts: DaemonOptions): Promise<number> {
   if (daemonProcess) {
     return daemonPort
   }
@@ -94,13 +105,15 @@ export async function spawnDaemon(databaseUrl: string): Promise<number> {
   const binPath = resolveBinaryPath()
   const port = await getFreePort()
 
-  console.log(`[daemon] Starting backend: ${binPath} on port ${port}`)
+  console.log(`[daemon] Starting backend in agent mode: ${binPath} on port ${port}`)
 
   const child = spawn(binPath, [], {
     env: {
       ...process.env,
+      MODE: 'agent',
       PORT: String(port),
-      DATABASE_URL: databaseUrl,
+      BACKEND_URL: opts.backendUrl,
+      GH_TOKEN: opts.ghToken,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
