@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGitHubRepos, getGitHubIssues, createRun } from '../lib/ipc'
+import { getGitHubRepos, createGitHubIssue, createRun, getGitHubIssues } from '../lib/ipc'
 import type { Provider, GitHubRepo, GitHubIssue } from '../lib/types'
 
 const MODELS: Record<string, string[]> = {
@@ -8,6 +8,8 @@ const MODELS: Record<string, string[]> = {
   openai: ['codex-mini-latest', 'gpt-5.4', 'gpt-5.3-codex'],
   gemini: ['gemini-3.1-pro', 'gemini-3.1-flash-lite'],
 }
+
+type IssueMode = 'create' | 'select'
 
 export default function CreateRun() {
   const navigate = useNavigate()
@@ -18,11 +20,17 @@ export default function CreateRun() {
   const [repoSearch, setRepoSearch] = useState('')
 
   const [selectedRepo, setSelectedRepo] = useState('')
+  const [issueMode, setIssueMode] = useState<IssueMode>('create')
+  
+  // For creating new issue
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  
+  // For selecting existing issue
   const [issues, setIssues] = useState<GitHubIssue[]>([])
   const [issuesLoading, setIssuesLoading] = useState(false)
-  const [issuesPage, setIssuesPage] = useState(1)
-  const [hasMoreIssues, setHasMoreIssues] = useState(true)
   const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null)
+  const [issueSearch, setIssueSearch] = useState('')
 
   const [provider, setProvider] = useState<Provider>('anthropic')
   const [model, setModel] = useState('claude-sonnet-4-6')
@@ -48,6 +56,34 @@ export default function CreateRun() {
       })
   }, [])
 
+  // Load issues when repo is selected and mode is 'select'
+  useEffect(() => {
+    if (!selectedRepo || issueMode !== 'select') {
+      setIssues([])
+      setSelectedIssue(null)
+      return
+    }
+
+    const loadIssues = async () => {
+      setIssuesLoading(true)
+      try {
+        const [owner, repo] = selectedRepo.split('/')
+        const allIssues = await getGitHubIssues(owner, repo)
+        // Filter out issues with "Auto Issue" label (these are handled by the poller)
+        const manualIssues = allIssues.filter(
+          (issue) => !issue.labels.some((label) => label.name.toLowerCase() === 'auto issue')
+        )
+        setIssues(manualIssues)
+      } catch (err) {
+        console.error('Failed to load issues:', err)
+      } finally {
+        setIssuesLoading(false)
+      }
+    }
+
+    loadIssues()
+  }, [selectedRepo, issueMode])
+
   const loadMoreRepos = async () => {
     const nextPage = reposPage + 1
     setReposPage(nextPage)
@@ -60,48 +96,42 @@ export default function CreateRun() {
     }
   }
 
-  // Load issues when repo is selected
-  useEffect(() => {
-    if (!selectedRepo) return
-    const [owner, repo] = selectedRepo.split('/')
-    setIssuesLoading(true)
-    setIssues([])
-    setIssuesPage(1)
-    setSelectedIssue(null)
-    getGitHubIssues(owner, repo, 1)
-      .then((i) => {
-        setIssues(i)
-        setHasMoreIssues(i.length === 30)
-        setIssuesLoading(false)
-      })
-      .catch((err) => {
-        console.error('Failed to load issues:', err)
-        setIssuesLoading(false)
-      })
-  }, [selectedRepo])
-
-  const loadMoreIssues = async () => {
-    const [owner, repo] = selectedRepo.split('/')
-    const nextPage = issuesPage + 1
-    setIssuesPage(nextPage)
-    try {
-      const more = await getGitHubIssues(owner, repo, nextPage)
-      setIssues((prev) => [...prev, ...more])
-      setHasMoreIssues(more.length === 30)
-    } catch (err) {
-      console.error('Failed to load more issues:', err)
-    }
-  }
-
   const handleSubmit = async () => {
-    if (!selectedRepo || !selectedIssue) return
+    if (!selectedRepo) return
+    
     setSubmitting(true)
     try {
+      let issueNumber: number
+      let issueTitle: string
+      let issueBody: string
+
+      if (issueMode === 'create') {
+        // Create new issue
+        if (!title.trim()) {
+          setSubmitting(false)
+          return
+        }
+        const [owner, repo] = selectedRepo.split('/')
+        const issue = await createGitHubIssue(owner, repo, title.trim(), description)
+        issueNumber = issue.number
+        issueTitle = title.trim()
+        issueBody = description
+      } else {
+        // Use existing issue
+        if (!selectedIssue) {
+          setSubmitting(false)
+          return
+        }
+        issueNumber = selectedIssue.number
+        issueTitle = selectedIssue.title
+        issueBody = selectedIssue.body || ''
+      }
+
       const run = await createRun({
         repo: selectedRepo,
-        issue_number: selectedIssue.number,
-        issue_title: selectedIssue.title,
-        issue_body: selectedIssue.body ?? '',
+        issue_number: issueNumber,
+        issue_title: issueTitle,
+        issue_body: issueBody,
         provider,
         model,
       })
@@ -116,7 +146,17 @@ export default function CreateRun() {
     ? repos.filter((r) => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
     : repos
 
-  const canSubmit = selectedRepo && selectedIssue && !submitting
+  const filteredIssues = issueSearch
+    ? issues.filter((i) => 
+        i.title.toLowerCase().includes(issueSearch.toLowerCase()) ||
+        i.number.toString().includes(issueSearch)
+      )
+    : issues
+
+  const canSubmit = selectedRepo && (
+    (issueMode === 'create' && title.trim()) || 
+    (issueMode === 'select' && selectedIssue)
+  ) && !submitting
 
   return (
     <div style={styles.page}>
@@ -153,7 +193,10 @@ export default function CreateRun() {
                       color: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--fg)',
                       background: selectedRepo === r.full_name ? 'var(--accent-flat)' : 'transparent',
                     }}
-                    onClick={() => setSelectedRepo(r.full_name)}
+                    onClick={() => {
+                      setSelectedRepo(r.full_name)
+                      setSelectedIssue(null)
+                    }}
                   >
                     <span style={styles.optionName}>
                       {r.full_name}
@@ -174,61 +217,113 @@ export default function CreateRun() {
           )}
         </div>
 
-        {/* Issue */}
+        {/* Issue Mode Selection */}
         {selectedRepo && (
           <div style={styles.field}>
-            <label style={styles.label}>ISSUE</label>
+            <label style={styles.label}>ISSUE SOURCE</label>
+            <div style={styles.modeRow}>
+              <button
+                style={{
+                  ...styles.modeBtn,
+                  borderColor: issueMode === 'create' ? 'var(--accent)' : 'var(--border-mid)',
+                  color: issueMode === 'create' ? 'var(--accent)' : 'var(--fg-muted)',
+                  background: issueMode === 'create' ? 'var(--accent-flat)' : 'transparent',
+                }}
+                onClick={() => setIssueMode('create')}
+              >
+                Create New Issue
+              </button>
+              <button
+                style={{
+                  ...styles.modeBtn,
+                  borderColor: issueMode === 'select' ? 'var(--accent)' : 'var(--border-mid)',
+                  color: issueMode === 'select' ? 'var(--accent)' : 'var(--fg-muted)',
+                  background: issueMode === 'select' ? 'var(--accent-flat)' : 'transparent',
+                }}
+                onClick={() => setIssueMode('select')}
+              >
+                Select Existing
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Create New Issue Form */}
+        {selectedRepo && issueMode === 'create' && (
+          <div style={styles.field}>
+            <label style={styles.label}>ISSUE DETAILS</label>
+            <input
+              style={styles.searchInput}
+              type="text"
+              placeholder="Issue title..."
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <textarea
+              style={{ ...styles.searchInput, height: 120, resize: 'vertical' }}
+              placeholder="Issue description (optional)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Select Existing Issue */}
+        {selectedRepo && issueMode === 'select' && (
+          <div style={styles.field}>
+            <label style={styles.label}>SELECT ISSUE</label>
+            <input
+              style={styles.searchInput}
+              type="text"
+              placeholder="Search issues..."
+              value={issueSearch}
+              onChange={(e) => setIssueSearch(e.target.value)}
+            />
             {issuesLoading ? (
               <div style={styles.emptyMsg}>Loading issues...</div>
             ) : issues.length === 0 ? (
-              <div style={styles.emptyMsg}>No open issues in this repository</div>
+              <div style={styles.emptyMsg}>No issues found without 'Auto Issue' label</div>
             ) : (
-              <>
-                <div style={styles.optionList}>
-                  {issues.map((iss) => (
-                    <button
-                      key={iss.number}
-                      style={{
-                        ...styles.optionBtn,
-                        borderColor: selectedIssue?.number === iss.number ? 'var(--accent)' : 'var(--border-mid)',
-                        color: selectedIssue?.number === iss.number ? 'var(--accent)' : 'var(--fg)',
-                        background: selectedIssue?.number === iss.number ? 'var(--accent-flat)' : 'transparent',
-                      }}
-                      onClick={() => setSelectedIssue(iss)}
-                    >
-                      <span style={styles.issueRow}>
-                        <span style={styles.issueNum}>#{iss.number}</span>
-                        <span style={styles.issueTitle}>{iss.title}</span>
-                      </span>
-                      <span style={styles.issueLabelRow}>
-                        {iss.labels.map((l) => (
+              <div style={styles.issueList}>
+                {filteredIssues.map((issue) => (
+                  <button
+                    key={issue.number}
+                    style={{
+                      ...styles.issueBtn,
+                      borderColor: selectedIssue?.number === issue.number ? 'var(--accent)' : 'var(--border-mid)',
+                      background: selectedIssue?.number === issue.number ? 'var(--accent-flat)' : 'transparent',
+                    }}
+                    onClick={() => setSelectedIssue(issue)}
+                  >
+                    <div style={styles.issueRow}>
+                      <span style={styles.issueNum}>#{issue.number}</span>
+                      <span style={styles.issueTitle}>{issue.title}</span>
+                    </div>
+                    {issue.labels.length > 0 && (
+                      <div style={styles.issueLabelRow}>
+                        {issue.labels.map((label) => (
                           <span
-                            key={l.name}
+                            key={label.name}
                             style={{
                               ...styles.issueLabel,
-                              color: `#${l.color}`,
-                              borderColor: `#${l.color}40`,
+                              borderColor: `#${label.color}`,
+                              color: `#${label.color}`,
                             }}
                           >
-                            {l.name}
+                            {label.name}
                           </span>
                         ))}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {hasMoreIssues && (
-                  <button style={styles.loadMoreBtn} onClick={loadMoreIssues}>
-                    Load more issues
+                      </div>
+                    )}
                   </button>
-                )}
-              </>
+                ))}
+              </div>
             )}
           </div>
         )}
 
         {/* Provider / Model */}
-        {selectedRepo && selectedIssue && (
+        {selectedRepo && (
           <div style={styles.field}>
             <label style={styles.label}>PROVIDER / MODEL</label>
             <div style={styles.providerRow}>
@@ -277,17 +372,28 @@ export default function CreateRun() {
             </select>
           </div>
         )}
-
+        
         {/* Summary & Submit */}
-        {selectedRepo && selectedIssue && (
+        {selectedRepo && (
           <div style={styles.summary}>
             <div style={styles.summaryLine}>
               <span style={styles.summaryLabel}>Repo:</span>
               <span style={styles.summaryValue}>{selectedRepo}</span>
             </div>
             <div style={styles.summaryLine}>
+              <span style={styles.summaryLabel}>Mode:</span>
+              <span style={styles.summaryValue}>
+                {issueMode === 'create' ? 'Create New Issue' : 'Use Existing Issue'}
+              </span>
+            </div>
+            <div style={styles.summaryLine}>
               <span style={styles.summaryLabel}>Issue:</span>
-              <span style={styles.summaryValue}>#{selectedIssue.number} &mdash; {selectedIssue.title}</span>
+              <span style={styles.summaryValue}>
+                {issueMode === 'create' 
+                  ? (title || 'Untitled')
+                  : (selectedIssue ? `#${selectedIssue.number} ${selectedIssue.title}` : 'None selected')
+                }
+              </span>
             </div>
             <div style={styles.summaryLine}>
               <span style={styles.summaryLabel}>Agent:</span>
@@ -447,6 +553,40 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     letterSpacing: '0.06em',
   },
+  modeRow: {
+    display: 'flex',
+    gap: '8px',
+  },
+  modeBtn: {
+    flex: 1,
+    padding: '10px 16px',
+    border: '1px solid',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    fontWeight: 500,
+    transition: 'all 150ms ease',
+  },
+  issueList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    maxHeight: '300px',
+    overflowY: 'auto',
+  },
+  issueBtn: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    padding: '10px 14px',
+    border: '1px solid',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    background: 'transparent',
+    textAlign: 'left' as const,
+    transition: 'all 150ms ease',
+  },
   issueRow: {
     display: 'flex',
     alignItems: 'center',
@@ -456,11 +596,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     fontSize: '12px',
     fontWeight: 600,
+    color: 'var(--accent)',
     flexShrink: 0,
   },
   issueTitle: {
     fontFamily: 'var(--font-mono)',
     fontSize: '12px',
+    color: 'var(--fg)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
