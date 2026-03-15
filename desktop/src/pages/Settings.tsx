@@ -154,6 +154,9 @@ export default function Settings() {
                 <span style={styles.notifDesc}>Monitor GitHub repos for new issues labeled 'Auto Issue'</span>
               </div>
               <button
+                type="button"
+                aria-label="Toggle polling for GitHub issues"
+                aria-pressed={settings.polling_enabled ?? true}
                 style={{
                   ...styles.toggleBtn,
                   background: (settings.polling_enabled ?? true) ? 'var(--accent)' : 'var(--bg3)',
