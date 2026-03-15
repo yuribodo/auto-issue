@@ -4,6 +4,9 @@ You give it a GitHub issue and pick an AI agent. It clones the repo, writes a so
 
 Supports Claude Code, Codex (OpenAI), and Gemini. Runs on your machine as local CLI processes.
 
+- Live demo: https://www.youtube.com/watch?v=qi4a_To_nfU
+- PDF presentation: https://drive.google.com/file/d/1lk69PKdagKQ1LXtqaCb6IfsZdLt4quVs/view
+
 ## How it works
 
 1. Create or import a GitHub issue into the Kanban board
