@@ -1,0 +1,76 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"auto-issue/internal/config"
+	"auto-issue/internal/models"
+
+	"gorm.io/gorm"
+)
+
+// ConfigRepository defines the data access contract for configuration.
+type ConfigRepository interface {
+	Load(ctx context.Context) (*config.Config, error)
+	Save(ctx context.Context, cfg *config.Config) error
+}
+
+// PGConfigRepository implements ConfigRepository backed by PostgreSQL via GORM.
+type PGConfigRepository struct {
+	db *gorm.DB
+}
+
+// NewPGConfigRepository creates a new PostgreSQL-backed config repository.
+func NewPGConfigRepository(db *gorm.DB) *PGConfigRepository {
+	return &PGConfigRepository{db: db}
+}
+
+// Compile-time interface verification.
+var _ ConfigRepository = (*PGConfigRepository)(nil)
+
+// Load reads the singleton config row from PostgreSQL.
+func (r *PGConfigRepository) Load(ctx context.Context) (*config.Config, error) {
+	var row models.Config
+	if err := r.db.WithContext(ctx).First(&row, 1).Error; err != nil {
+		return nil, fmt.Errorf("loading config from database: %w", err)
+	}
+
+	timeout, err := time.ParseDuration(row.AgentTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("invalid agent_timeout %q: %w", row.AgentTimeout, err)
+	}
+
+	return &config.Config{
+		APIPort:        row.APIPort,
+		MaxConcurrency: row.MaxConcurrency,
+		Agent: config.AgentConfig{
+			Type:          row.AgentType,
+			Model:         row.AgentModel,
+			Timeout:       config.Duration{Duration: timeout},
+			MaxIterations: row.AgentMaxIter,
+			Prompt:        row.AgentPrompt,
+		},
+		Workspace: config.WorkspaceConfig{
+			BasePath: row.WorkspaceBase,
+		},
+	}, nil
+}
+
+// Save writes the config to the singleton row in PostgreSQL.
+func (r *PGConfigRepository) Save(ctx context.Context, cfg *config.Config) error {
+	row := models.Config{
+		ID:             1,
+		APIPort:        cfg.APIPort,
+		MaxConcurrency: cfg.MaxConcurrency,
+		AgentType:      cfg.Agent.Type,
+		AgentModel:     cfg.Agent.Model,
+		AgentTimeout:   cfg.Agent.Timeout.Duration.String(),
+		AgentMaxIter:   cfg.Agent.MaxIterations,
+		AgentPrompt:    cfg.Agent.Prompt,
+		WorkspaceBase:  cfg.Workspace.BasePath,
+	}
+
+	return r.db.WithContext(ctx).Save(&row).Error
+}
