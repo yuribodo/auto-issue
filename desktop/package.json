@@ -13,7 +13,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
     "lint": "eslint . --ext .ts,.tsx",
-    "package": "npm run build && electron-builder",
+    "build:backend": "bash ../scripts/build-backend.sh",
+    "package": "npm run build:backend && npm run build && electron-builder --publish never",
     "publish": "npm run build && electron-builder --publish always",
     "preview": "vite preview"
   },
@@ -26,6 +27,9 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
+    ],
+    "extraResources": [
+      { "from": "resources/backend/", "to": "backend", "filter": ["auto-issue-backend*"] }
     ],
     "publish": {
       "provider": "github",
