@@ -8,7 +8,42 @@
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",
     "lint": "eslint . --ext .ts,.tsx",
     "package": "npm run build && electron-builder",
+    "publish": "npm run build && electron-builder --publish always",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.yuribodo.auto-issue",
+    "productName": "Auto Issue",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "yuribodo",
+      "repo": "auto-issue"
+    },
+    "mac": {
+      "target": "dmg",
+      "identity": null
+    },
+    "win": {
+      "target": {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development"
+    }
   },
   "dependencies": {
     "react": "^18.3.1",

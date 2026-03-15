@@ -28,13 +28,13 @@ export default function Home() {
 
             <div className="hero-ctas fade-up" style={{ animationDelay: "300ms" }}>
               <a
-                href="https://github.com/auto-issue/auto-issue/releases/latest"
+                href="https://github.com/yuribodo/auto-issue/releases/latest"
                 className="btn-primary"
               >
                 Download for macOS →
               </a>
               <a
-                href="https://github.com/auto-issue/auto-issue"
+                href="https://github.com/yuribodo/auto-issue"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-ghost"
@@ -46,14 +46,14 @@ export default function Home() {
             <div className="hero-alt-downloads fade-up" style={{ animationDelay: "300ms" }}>
               <span className="alt-download-label">Also available for</span>
               <a
-                href="https://github.com/auto-issue/auto-issue/releases/latest"
+                href="https://github.com/yuribodo/auto-issue/releases/latest"
                 className="alt-download-link"
               >
                 Windows
               </a>
               <span className="alt-download-sep">·</span>
               <a
-                href="https://github.com/auto-issue/auto-issue/releases/latest"
+                href="https://github.com/yuribodo/auto-issue/releases/latest"
                 className="alt-download-link"
               >
                 Linux
@@ -121,13 +121,13 @@ export default function Home() {
           </p>
           <div className="final-cta-buttons">
             <a
-              href="https://github.com/auto-issue/auto-issue/releases/latest"
+              href="https://github.com/yuribodo/auto-issue/releases/latest"
               className="btn-primary"
             >
               Download for macOS →
             </a>
             <a
-              href="https://github.com/auto-issue/auto-issue"
+              href="https://github.com/yuribodo/auto-issue"
               target="_blank"
               rel="noopener noreferrer"
               className="btn-ghost"
