@@ -147,6 +147,30 @@ export default function Settings() {
                 ))}
               </div>
             )}
+
+            <div style={styles.notifRow}>
+              <div style={styles.notifInfo}>
+                <span style={styles.notifLabel}>Enable Polling</span>
+                <span style={styles.notifDesc}>Monitor GitHub repos for new issues labeled 'Auto Issue'</span>
+              </div>
+              <button
+                style={{
+                  ...styles.toggleBtn,
+                  background: (settings.polling_enabled ?? true) ? 'var(--accent)' : 'var(--bg3)',
+                }}
+                onClick={() => {
+                  const next = !(settings.polling_enabled ?? true)
+                  updateSettings({ polling_enabled: next })
+                }}
+              >
+                <span
+                  style={{
+                    ...styles.toggleDot,
+                    transform: (settings.polling_enabled ?? true) ? 'translateX(14px)' : 'translateX(0)',
+                  }}
+                />
+              </button>
+            </div>
           </div>
         )}
 
@@ -318,7 +342,7 @@ export default function Settings() {
                 <span style={styles.pollingValue}>{settings.polling_interval}s</span>
               </div>
               <span style={styles.pollingNote}>
-                How often the dashboard checks for run updates
+                How often to check GitHub repos for new issues with the 'Auto Issue' label
               </span>
             </div>
 
