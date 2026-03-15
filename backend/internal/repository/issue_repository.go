@@ -15,12 +15,15 @@ import (
 // IssueRepository defines the data access contract for issues.
 type IssueRepository interface {
 	Create(ctx context.Context, id, title, description, repoPath string) (*models.Issue, error)
+	CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error)
 	Get(ctx context.Context, id string) (*models.Issue, error)
 	List(ctx context.Context, phaseFilter string) ([]*models.Issue, error)
 	Transition(ctx context.Context, id string, to string) error
 	SetFeedback(ctx context.Context, id string, feedback string, maxIterations int) error
 	StartDeveloping(ctx context.Context, id string, workspacePath string) error
 	UpdateOutput(ctx context.Context, id string, output string, logs string) error
+	UpdatePR(ctx context.Context, id string, prURL string) error
+	UpdateCost(ctx context.Context, id string, costUSD float64, turns int) error
 }
 
 // PGIssueRepository implements IssueRepository backed by PostgreSQL via GORM.
@@ -42,6 +45,24 @@ func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, 
 		Title:       title,
 		Description: description,
 		RepoPath:    repoPath,
+		Phase:       constants.PhaseBacklog,
+	}
+
+	if err := r.db.WithContext(ctx).Create(&issue).Error; err != nil {
+		return nil, fmt.Errorf("creating issue: %w", err)
+	}
+
+	return &issue, nil
+}
+
+func (r *PGIssueRepository) CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int) (*models.Issue, error) {
+	issue := models.Issue{
+		IssueID:     id,
+		Title:       title,
+		Description: description,
+		RepoPath:    repoPath,
+		GithubRepo:  githubRepo,
+		IssueNumber: issueNumber,
 		Phase:       constants.PhaseBacklog,
 	}
 
@@ -149,5 +170,20 @@ func (r *PGIssueRepository) UpdateOutput(ctx context.Context, id string, output 
 			"last_output": output,
 			"agent_logs":  logs,
 			"last_run_at": &now,
+		}).Error
+}
+
+func (r *PGIssueRepository) UpdatePR(ctx context.Context, id string, prURL string) error {
+	return r.db.WithContext(ctx).Model(&models.Issue{}).
+		Where("issue_id = ?", id).
+		Update("pr_url", prURL).Error
+}
+
+func (r *PGIssueRepository) UpdateCost(ctx context.Context, id string, costUSD float64, turns int) error {
+	return r.db.WithContext(ctx).Model(&models.Issue{}).
+		Where("issue_id = ?", id).
+		Updates(map[string]any{
+			"cost_usd": costUSD,
+			"turns":    turns,
 		}).Error
 }

@@ -47,10 +47,11 @@ func setupTestHandler(t *testing.T) (*Handler, *http.ServeMux) {
 		t.Fatalf("creating workspace manager: %v", err)
 	}
 
-	ag := agent.NewRunner(cfg.Agent)
-	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, cfg.MaxConcurrency)
+	ag := agent.NewRunner(cfg.Agent, "")
+	broadcaster := NewBroadcaster()
+	orch := service.NewOrchestrator(wsMgr, issueRepo, ag, broadcaster, "", cfg.MaxConcurrency)
 
-	h := NewHandler(issueRepo, nil, orch, cfg)
+	h := NewHandler(issueRepo, nil, orch, cfg, broadcaster)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 

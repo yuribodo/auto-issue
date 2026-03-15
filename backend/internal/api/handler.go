@@ -20,21 +20,23 @@ import (
 // Handler serves the auto-issue REST API, delegating to the repository
 // and orchestrator for issue lifecycle management.
 type Handler struct {
-	issues     repository.IssueRepository
-	configRepo repository.ConfigRepository
-	orch       *service.Orchestrator
-	config     *config.Config
-	startTime  time.Time
+	issues      repository.IssueRepository
+	configRepo  repository.ConfigRepository
+	orch        *service.Orchestrator
+	config      *config.Config
+	broadcaster *Broadcaster
+	startTime   time.Time
 }
 
 // NewHandler creates a Handler wired to the given dependencies.
-func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigRepository, orch *service.Orchestrator, cfg *config.Config) *Handler {
+func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigRepository, orch *service.Orchestrator, cfg *config.Config, broadcaster *Broadcaster) *Handler {
 	return &Handler{
-		issues:     issues,
-		configRepo: configRepo,
-		orch:       orch,
-		config:     cfg,
-		startTime:  time.Now(),
+		issues:      issues,
+		configRepo:  configRepo,
+		orch:        orch,
+		config:      cfg,
+		broadcaster: broadcaster,
+		startTime:   time.Now(),
 	}
 }
 
@@ -96,6 +98,8 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		Title       string `json:"title"`
 		Description string `json:"description"`
 		RepoPath    string `json:"repo_path"`
+		GithubRepo  string `json:"github_repo"`
+		IssueNumber int    `json:"issue_number"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -108,7 +112,14 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := fmt.Sprintf("issue-%d", time.Now().UnixMilli())
-	issue, err := h.issues.Create(r.Context(), id, req.Title, req.Description, req.RepoPath)
+
+	var issue *models.Issue
+	var err error
+	if req.GithubRepo != "" {
+		issue, err = h.issues.CreateWithGithub(r.Context(), id, req.Title, req.Description, req.RepoPath, req.GithubRepo, req.IssueNumber)
+	} else {
+		issue, err = h.issues.Create(r.Context(), id, req.Title, req.Description, req.RepoPath)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -138,6 +149,8 @@ func (h *Handler) handleIssueByPath(w http.ResponseWriter, r *http.Request) {
 		h.moveIssue(w, r, issueID)
 	case "feedback":
 		h.submitFeedback(w, r, issueID)
+	case "events":
+		h.streamEvents(w, r, issueID)
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "unknown action: "+action)
 	}
@@ -260,6 +273,21 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 		"message": "Feedback submitted, restarting agent",
 		"issue":   issue,
 	})
+}
+
+func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is allowed")
+		return
+	}
+
+	// Verify issue exists
+	if _, err := h.issues.Get(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	h.broadcaster.ServeSSE(w, r, id)
 }
 
 func (h *Handler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
