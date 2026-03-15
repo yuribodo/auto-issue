@@ -8,9 +8,9 @@ const RELEASE_BASE =
   "https://github.com/yuribodo/auto-issue/releases/latest/download";
 
 const DOWNLOAD_MAP: Record<OS, { file: string; label: string }> = {
-  macOS: { file: "Auto-Issue-0.3.0-arm64.dmg", label: "Download for macOS" },
-  Windows: { file: "Auto-Issue-Setup-0.3.0.exe", label: "Download for Windows" },
-  Linux: { file: "Auto-Issue-0.3.0.AppImage", label: "Download for Linux" },
+  macOS: { file: "Auto-Issue-0.3.1-arm64.dmg", label: "Download for macOS" },
+  Windows: { file: "Auto-Issue-Setup-0.3.1.exe", label: "Download for Windows" },
+  Linux: { file: "Auto-Issue-0.3.1.AppImage", label: "Download for Linux" },
 };
 
 const OS_ORDER: OS[] = ["macOS", "Windows", "Linux"];
