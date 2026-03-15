@@ -41,14 +41,12 @@ export default function ApprovePanel({ run, onApproved, onRejected }: ApprovePan
       <div style={styles.subtitle}>Review the pull request before approving or rejecting this run.</div>
 
       {run.pr_url && (
-        <a
-          href={run.pr_url}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
           style={styles.prLink}
+          onClick={() => window.electronAPI.invoke('shell:open-external', run.pr_url)}
         >
-          View PR #{run.issue_number} on GitHub
-        </a>
+          View PR on GitHub &rarr;
+        </button>
       )}
 
       <div style={styles.actions}>
@@ -106,7 +104,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     fontSize: '12px',
     color: '#60a5fa',
-    textDecoration: 'none',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    padding: 0,
     display: 'inline-block',
     marginBottom: '16px',
   },

@@ -38,7 +38,24 @@ export interface SSEEvent {
 export interface User {
   login: string
   avatar_url: string
-  name: string
+  name: string | null
+}
+
+export interface GitHubRepo {
+  id: number
+  full_name: string
+  description: string | null
+  language: string | null
+  open_issues_count: number
+  private: boolean
+}
+
+export interface GitHubIssue {
+  number: number
+  title: string
+  body: string | null
+  labels: Array<{ name: string; color: string }>
+  created_at: string
 }
 
 export interface Repository {
@@ -102,7 +119,7 @@ export interface SettingsData {
     pr_opened: boolean
   }
   polling_interval: number
-  github_token: string
+  monitored_repos: string[]
 }
 
 export interface CreateRunParams {

@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import type { SSEEvent } from './types'
 import { getRunEvents } from './ipc'
-import { MOCK_SSE_EVENTS } from './mocks'
 
 export function useSSE(runId: string | null): {
   events: SSEEvent[]
@@ -39,39 +38,6 @@ export function useSSE(runId: string | null): {
       setConnected(false)
     }
   }, [runId])
-
-  return { events, connected }
-}
-
-export function useMockSSE(): { events: SSEEvent[]; connected: boolean } {
-  const [events, setEvents] = useState<SSEEvent[]>([])
-  const [connected, setConnected] = useState(false)
-  const timerIds = useRef<ReturnType<typeof setTimeout>[]>([])
-
-  const replay = useCallback(() => {
-    setEvents([])
-    setConnected(true)
-
-    timerIds.current.forEach(clearTimeout)
-    timerIds.current = []
-
-    MOCK_SSE_EVENTS.forEach((event, i) => {
-      const id = setTimeout(() => {
-        setEvents((prev) => [...prev, event])
-      }, (i + 1) * 800)
-      timerIds.current.push(id)
-    })
-  }, [])
-
-  useEffect(() => {
-    replay()
-
-    return () => {
-      timerIds.current.forEach(clearTimeout)
-      timerIds.current = []
-      setConnected(false)
-    }
-  }, [replay])
 
   return { events, connected }
 }

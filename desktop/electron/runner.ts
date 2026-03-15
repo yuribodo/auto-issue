@@ -6,6 +6,7 @@ import fs from 'node:fs'
 
 import { loadRuns, persistRuns, loadConfig, loadEvents, appendEvent } from './store'
 import { ensureClone, createWorktree, cleanupWorktree } from './workspace'
+import { getAuthToken } from './auth'
 import type { Run, SSEEvent, CreateRunParams, Provider } from './shared-types'
 
 interface ManagedProcess {
@@ -51,7 +52,7 @@ function updateRun(run: Run): void {
 function buildCommand(provider: Provider): { cmd: string; args: string[] } {
   switch (provider) {
     case 'anthropic':
-      return { cmd: 'claude', args: ['--print'] }
+      return { cmd: 'claude', args: ['-p', '--verbose', '--output-format', 'stream-json', '--dangerously-skip-permissions', '--include-partial-messages'] }
     case 'openai':
       return { cmd: 'codex', args: [] }
     case 'gemini':
@@ -60,14 +61,28 @@ function buildCommand(provider: Provider): { cmd: string; args: string[] } {
 }
 
 function buildPrompt(run: Run): string {
-  return `Fix issue #${run.issue_number}: ${run.issue_title}\n\n${run.issue_body}`
+  return `You are working on the repository ${run.repo}. Fix GitHub issue #${run.issue_number}.
+
+Issue title: ${run.issue_title}
+
+Issue description:
+${run.issue_body ?? ''}
+
+Instructions:
+1. Analyze the issue and understand what needs to be fixed
+2. Make the necessary code changes
+3. Run any existing tests to verify your changes
+4. Create a git commit with a descriptive message referencing the issue
+5. Push the branch and create a pull request that closes #${run.issue_number}
+
+Use \`gh pr create --title "Fix #${run.issue_number}: ${run.issue_title}" --body "Closes #${run.issue_number}"\` to create the PR.`
 }
 
 function envForProvider(provider: Provider, apiKeys: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {}
   switch (provider) {
     case 'anthropic':
-      if (apiKeys.anthropic) env.ANTHROPIC_API_KEY = apiKeys.anthropic
+      // Claude CLI uses its own auth (claude login), no API key needed
       break
     case 'openai':
       if (apiKeys.openai) env.OPENAI_API_KEY = apiKeys.openai
@@ -118,9 +133,11 @@ export async function startRun(runId: string): Promise<void> {
 
   emitEvent(runId, makeEvent('status', 'INFO', 'Preparing workspace...'))
 
+  const authToken = getAuthToken() ?? ''
+
   let worktreePath: string
   try {
-    const clonePath = await ensureClone(run.repo, config.github_token)
+    const clonePath = await ensureClone(run.repo, authToken)
     managed.clonePath = clonePath
     emitEvent(runId, makeEvent('log', 'INFO', `Repository cloned/fetched: ${run.repo}`))
 
@@ -141,31 +158,165 @@ export async function startRun(runId: string): Promise<void> {
 
   emitEvent(runId, makeEvent('log', 'INFO', `Spawning: ${cmd} ${args.join(' ')} "<prompt>"`))
 
-  const child = spawn(cmd, [...args, prompt], {
+  // Use `script` to allocate a PTY so Claude CLI doesn't buffer stdout
+  const fullArgs = [...args, prompt]
+  const escapedCmd = [cmd, ...fullArgs].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
+  const child = spawn('script', ['-qc', escapedCmd, '/dev/null'], {
     cwd: worktreePath,
-    env: { ...process.env, ...providerEnv },
+    env: { ...process.env, ...providerEnv, GH_TOKEN: authToken, GITHUB_TOKEN: authToken },
   })
 
   managed.child = child
 
-  const handleOutput = (data: Buffer, prefix: string) => {
-    const lines = data.toString().split('\n').filter((l) => l.length > 0)
-    for (const line of lines) {
-      emitEvent(runId, makeEvent('log', prefix, line))
+  // Buffer for incomplete JSON lines from stdout
+  let stdoutBuffer = ''
 
-      // Detect PR URL
-      const prMatch = line.match(PR_REGEX)
-      if (prMatch) {
-        run.pr_url = prMatch[0]
-        run.status = 'awaiting_approval'
-        updateRun(run)
-        emitEvent(runId, makeEvent('status', 'INFO', `PR detected: ${prMatch[0]}`))
+  // Buffer streaming text deltas to emit complete sentences
+  let textBuffer = ''
+  let textFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+  function flushTextBuffer() {
+    if (textFlushTimer) { clearTimeout(textFlushTimer); textFlushTimer = null }
+    if (!textBuffer.trim()) { textBuffer = ''; return }
+    // Split into lines and emit each
+    for (const line of textBuffer.split('\n')) {
+      if (line.trim()) {
+        emitEvent(runId, makeEvent('log', 'AGENT', line.trim()))
+      }
+    }
+    textBuffer = ''
+  }
+
+  function appendTextDelta(text: string) {
+    textBuffer += text
+    // Flush on sentence boundaries or newlines
+    if (/[.!?\n]/.test(text)) {
+      flushTextBuffer()
+    } else {
+      if (textFlushTimer) clearTimeout(textFlushTimer)
+      textFlushTimer = setTimeout(flushTextBuffer, 400)
+    }
+  }
+
+  // Shorten long absolute paths to relative
+  function shortPath(p: string): string {
+    if (typeof p !== 'string') return ''
+    return p.replace(worktreePath + '/', '').replace(worktreePath, '.')
+  }
+
+  function formatToolUse(name: string, input: Record<string, unknown>): string {
+    switch (name) {
+      case 'Read':
+        return `${shortPath(String(input.file_path ?? ''))}${input.offset ? `:${input.offset}` : ''}`
+      case 'Edit':
+        return shortPath(String(input.file_path ?? ''))
+      case 'Write':
+        return shortPath(String(input.file_path ?? ''))
+      case 'Bash': {
+        const cmd = shortPath(String(input.command ?? '')).slice(0, 120)
+        return cmd
+      }
+      case 'Glob':
+        return String(input.pattern ?? '')
+      case 'Grep':
+        return `"${input.pattern ?? ''}"${input.path ? ` in ${shortPath(String(input.path))}` : ''}`
+      case 'Agent':
+        return String(input.description ?? input.prompt ?? '').slice(0, 80)
+      case 'TodoWrite':
+      case 'TodoRead':
+        return ''
+      default:
+        return JSON.stringify(input).slice(0, 80)
+    }
+  }
+
+  // Map tool names to short action verbs
+  function toolVerb(name: string): string {
+    const map: Record<string, string> = {
+      Read: 'READ', Edit: 'EDIT', Write: 'WRITE', Bash: 'EXEC',
+      Glob: 'FIND', Grep: 'SEARCH', Agent: 'SPAWN', TodoWrite: 'PLAN',
+      TodoRead: 'PLAN', WebFetch: 'FETCH', WebSearch: 'SEARCH',
+    }
+    return map[name] ?? name.toUpperCase().slice(0, 6)
+  }
+
+  const handleStreamJson = (chunk: Buffer) => {
+    stdoutBuffer += chunk.toString()
+    const lines = stdoutBuffer.split('\n')
+    stdoutBuffer = lines.pop() ?? ''
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+
+      try {
+        const parsed = JSON.parse(line)
+
+        // Incremental streaming — buffer text deltas
+        if (parsed.type === 'stream_event') {
+          const evt = parsed.event
+          if (evt?.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta?.text) {
+            appendTextDelta(evt.delta.text)
+          }
+          continue
+        }
+
+        // Full assistant message — skip text (already streamed), handle tool_use
+        if (parsed.type === 'assistant' && parsed.message?.content) {
+          flushTextBuffer()
+          for (const block of parsed.message.content) {
+            if (block.type === 'text' && block.text) {
+              // PR detection on full text
+              const prMatch = block.text.match(PR_REGEX)
+              if (prMatch) {
+                run.pr_url = prMatch[0]
+                run.status = 'awaiting_approval'
+                updateRun(run)
+                emitEvent(runId, makeEvent('status', 'PR', prMatch[0]))
+              }
+              // Skip emitting — already streamed via deltas
+            } else if (block.type === 'tool_use') {
+              run.turns++
+              updateRun(run)
+              const verb = toolVerb(block.name ?? 'tool')
+              const detail = formatToolUse(block.name ?? 'tool', block.input ?? {})
+              emitEvent(runId, makeEvent('turn', verb, detail))
+            }
+          }
+        } else if (parsed.type === 'tool_result') {
+          // Skip tool results — too noisy
+        } else if (parsed.type === 'result') {
+          flushTextBuffer()
+          if (parsed.total_cost_usd) run.cost_usd = parsed.total_cost_usd
+          updateRun(run)
+          const summary = parsed.is_error
+            ? `${String(parsed.result ?? 'Unknown error').slice(0, 200)}`
+            : `${run.turns} turns · $${(run.cost_usd ?? 0).toFixed(2)}`
+          emitEvent(runId, makeEvent('status', parsed.is_error ? 'FAIL' : 'DONE', summary))
+        } else if (parsed.type === 'system' && parsed.subtype === 'init') {
+          emitEvent(runId, makeEvent('status', 'INIT', `${parsed.model ?? 'agent'}`))
+        }
+      } catch {
+        if (line.trim()) {
+          emitEvent(runId, makeEvent('log', 'INFO', line.trim()))
+          const prMatch = line.match(PR_REGEX)
+          if (prMatch) {
+            run.pr_url = prMatch[0]
+            run.status = 'awaiting_approval'
+            updateRun(run)
+            emitEvent(runId, makeEvent('status', 'PR', prMatch[0]))
+          }
+        }
       }
     }
   }
 
-  child.stdout?.on('data', (data: Buffer) => handleOutput(data, 'INFO'))
-  child.stderr?.on('data', (data: Buffer) => handleOutput(data, 'ERR'))
+  child.stdout?.on('data', (data: Buffer) => handleStreamJson(data))
+  child.stderr?.on('data', (data: Buffer) => {
+    const lines = data.toString().split('\n').filter((l) => l.length > 0)
+    for (const line of lines) {
+      emitEvent(runId, makeEvent('log', 'ERR', line))
+    }
+  })
 
   child.on('close', async (code) => {
     managed.child = null

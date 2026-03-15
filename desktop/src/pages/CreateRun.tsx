@@ -1,34 +1,100 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MOCK_REPOSITORIES, MOCK_ISSUES, MOCK_MODELS } from '../lib/mocks'
-import type { Provider, Issue } from '../lib/types'
-import { createRun } from '../lib/ipc'
+import { getGitHubRepos, getGitHubIssues, createRun } from '../lib/ipc'
+import type { Provider, GitHubRepo, GitHubIssue } from '../lib/types'
+
+const MODELS: Record<string, string[]> = {
+  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'],
+}
 
 export default function CreateRun() {
   const navigate = useNavigate()
-  const [repo, setRepo] = useState('')
-  const [issue, setIssue] = useState<Issue | null>(null)
-  const [provider, setProvider] = useState<Provider>('anthropic')
+  const [repos, setRepos] = useState<GitHubRepo[]>([])
+  const [reposLoading, setReposLoading] = useState(true)
+  const [reposPage, setReposPage] = useState(1)
+  const [hasMoreRepos, setHasMoreRepos] = useState(true)
+  const [repoSearch, setRepoSearch] = useState('')
+
+  const [selectedRepo, setSelectedRepo] = useState('')
+  const [issues, setIssues] = useState<GitHubIssue[]>([])
+  const [issuesLoading, setIssuesLoading] = useState(false)
+  const [issuesPage, setIssuesPage] = useState(1)
+  const [hasMoreIssues, setHasMoreIssues] = useState(true)
+  const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null)
+
+  const [provider] = useState<Provider>('anthropic')
   const [model, setModel] = useState('claude-sonnet-4-6')
   const [submitting, setSubmitting] = useState(false)
 
-  const monitoredRepos = MOCK_REPOSITORIES.filter((r) => r.is_monitored)
-  const issues = repo ? (MOCK_ISSUES[repo] ?? []) : []
+  // Load repos
+  useEffect(() => {
+    setReposLoading(true)
+    getGitHubRepos(1)
+      .then((r) => {
+        setRepos(r)
+        setHasMoreRepos(r.length === 30)
+        setReposLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load repos:', err)
+        setReposLoading(false)
+      })
+  }, [])
 
-  const handleProviderChange = (p: Provider) => {
-    setProvider(p)
-    setModel(MOCK_MODELS[p][0])
+  const loadMoreRepos = async () => {
+    const nextPage = reposPage + 1
+    setReposPage(nextPage)
+    try {
+      const more = await getGitHubRepos(nextPage)
+      setRepos((prev) => [...prev, ...more])
+      setHasMoreRepos(more.length === 30)
+    } catch (err) {
+      console.error('Failed to load more repos:', err)
+    }
+  }
+
+  // Load issues when repo is selected
+  useEffect(() => {
+    if (!selectedRepo) return
+    const [owner, repo] = selectedRepo.split('/')
+    setIssuesLoading(true)
+    setIssues([])
+    setIssuesPage(1)
+    setSelectedIssue(null)
+    getGitHubIssues(owner, repo, 1)
+      .then((i) => {
+        setIssues(i)
+        setHasMoreIssues(i.length === 30)
+        setIssuesLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load issues:', err)
+        setIssuesLoading(false)
+      })
+  }, [selectedRepo])
+
+  const loadMoreIssues = async () => {
+    const [owner, repo] = selectedRepo.split('/')
+    const nextPage = issuesPage + 1
+    setIssuesPage(nextPage)
+    try {
+      const more = await getGitHubIssues(owner, repo, nextPage)
+      setIssues((prev) => [...prev, ...more])
+      setHasMoreIssues(more.length === 30)
+    } catch (err) {
+      console.error('Failed to load more issues:', err)
+    }
   }
 
   const handleSubmit = async () => {
-    if (!repo || !issue) return
+    if (!selectedRepo || !selectedIssue) return
     setSubmitting(true)
     try {
       const run = await createRun({
-        repo,
-        issue_number: issue.number,
-        issue_title: issue.title,
-        issue_body: issue.labels.join(', '), // best available from mock data
+        repo: selectedRepo,
+        issue_number: selectedIssue.number,
+        issue_title: selectedIssue.title,
+        issue_body: selectedIssue.body ?? '',
         provider,
         model,
       })
@@ -39,13 +105,17 @@ export default function CreateRun() {
     }
   }
 
-  const canSubmit = repo && issue && !submitting
+  const filteredRepos = repoSearch
+    ? repos.filter((r) => r.full_name.toLowerCase().includes(repoSearch.toLowerCase()))
+    : repos
+
+  const canSubmit = selectedRepo && selectedIssue && !submitting
 
   return (
     <div style={styles.page}>
       <div style={styles.header}>
         <button style={styles.backBtn} onClick={() => navigate('/dashboard')}>
-          ← Back
+          &larr; Back
         </button>
         <h1 style={styles.title}>New Run</h1>
         <p style={styles.subtitle}>Create a manual run for a specific issue</p>
@@ -55,100 +125,147 @@ export default function CreateRun() {
         {/* Repository */}
         <div style={styles.field}>
           <label style={styles.label}>REPOSITORY</label>
-          <div style={styles.optionList}>
-            {monitoredRepos.map((r) => (
-              <button
-                key={r.id}
-                style={{
-                  ...styles.optionBtn,
-                  borderColor: repo === r.full_name ? 'var(--accent)' : 'var(--border-mid)',
-                  color: repo === r.full_name ? 'var(--accent)' : 'var(--fg)',
-                  background: repo === r.full_name ? 'var(--accent-flat)' : 'transparent',
-                }}
-                onClick={() => {
-                  setRepo(r.full_name)
-                  setIssue(null)
-                }}
-              >
-                <span style={styles.optionName}>{r.full_name}</span>
-                <span style={styles.optionMeta}>
-                  {r.open_issues_count} issues · {r.language}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Issue */}
-        {repo && (
-          <div style={styles.field}>
-            <label style={styles.label}>ISSUE</label>
-            {issues.length === 0 ? (
-              <div style={styles.emptyMsg}>No open issues in this repository</div>
-            ) : (
+          <input
+            style={styles.searchInput}
+            type="text"
+            placeholder="Search repos..."
+            value={repoSearch}
+            onChange={(e) => setRepoSearch(e.target.value)}
+          />
+          {reposLoading ? (
+            <div style={styles.emptyMsg}>Loading repositories...</div>
+          ) : (
+            <>
               <div style={styles.optionList}>
-                {issues.map((iss) => (
+                {filteredRepos.map((r) => (
                   <button
-                    key={iss.number}
+                    key={r.id}
                     style={{
                       ...styles.optionBtn,
-                      borderColor: issue?.number === iss.number ? 'var(--accent)' : 'var(--border-mid)',
-                      color: issue?.number === iss.number ? 'var(--accent)' : 'var(--fg)',
-                      background: issue?.number === iss.number ? 'var(--accent-flat)' : 'transparent',
+                      borderColor: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--border-mid)',
+                      color: selectedRepo === r.full_name ? 'var(--accent)' : 'var(--fg)',
+                      background: selectedRepo === r.full_name ? 'var(--accent-flat)' : 'transparent',
                     }}
-                    onClick={() => setIssue(iss)}
+                    onClick={() => setSelectedRepo(r.full_name)}
                   >
-                    <span style={styles.issueRow}>
-                      <span style={styles.issueNum}>#{iss.number}</span>
-                      <span style={styles.issueTitle}>{iss.title}</span>
+                    <span style={styles.optionName}>
+                      {r.full_name}
+                      {r.private && <span style={styles.privateBadge}>PRIVATE</span>}
                     </span>
-                    <span style={styles.issueLabelRow}>
-                      {iss.labels.map((l) => (
-                        <span
-                          key={l}
-                          style={{
-                            ...styles.issueLabel,
-                            color: l === 'auto-issue' ? 'var(--accent)' : l === 'bug' ? 'var(--red)' : l === 'critical' ? 'var(--amber)' : 'var(--fg-muted)',
-                            borderColor: l === 'auto-issue' ? 'rgba(0,230,118,0.3)' : l === 'bug' ? 'rgba(239,68,68,0.3)' : l === 'critical' ? 'rgba(255,171,0,0.3)' : 'var(--border-mid)',
-                          }}
-                        >
-                          {l}
-                        </span>
-                      ))}
+                    <span style={styles.optionMeta}>
+                      {r.open_issues_count} issues{r.language ? ` · ${r.language}` : ''}
                     </span>
                   </button>
                 ))}
               </div>
+              {hasMoreRepos && !repoSearch && (
+                <button style={styles.loadMoreBtn} onClick={loadMoreRepos}>
+                  Load more repos
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Issue */}
+        {selectedRepo && (
+          <div style={styles.field}>
+            <label style={styles.label}>ISSUE</label>
+            {issuesLoading ? (
+              <div style={styles.emptyMsg}>Loading issues...</div>
+            ) : issues.length === 0 ? (
+              <div style={styles.emptyMsg}>No open issues in this repository</div>
+            ) : (
+              <>
+                <div style={styles.optionList}>
+                  {issues.map((iss) => (
+                    <button
+                      key={iss.number}
+                      style={{
+                        ...styles.optionBtn,
+                        borderColor: selectedIssue?.number === iss.number ? 'var(--accent)' : 'var(--border-mid)',
+                        color: selectedIssue?.number === iss.number ? 'var(--accent)' : 'var(--fg)',
+                        background: selectedIssue?.number === iss.number ? 'var(--accent-flat)' : 'transparent',
+                      }}
+                      onClick={() => setSelectedIssue(iss)}
+                    >
+                      <span style={styles.issueRow}>
+                        <span style={styles.issueNum}>#{iss.number}</span>
+                        <span style={styles.issueTitle}>{iss.title}</span>
+                      </span>
+                      <span style={styles.issueLabelRow}>
+                        {iss.labels.map((l) => (
+                          <span
+                            key={l.name}
+                            style={{
+                              ...styles.issueLabel,
+                              color: `#${l.color}`,
+                              borderColor: `#${l.color}40`,
+                            }}
+                          >
+                            {l.name}
+                          </span>
+                        ))}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {hasMoreIssues && (
+                  <button style={styles.loadMoreBtn} onClick={loadMoreIssues}>
+                    Load more issues
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
 
         {/* Provider / Model */}
-        {repo && issue && (
+        {selectedRepo && selectedIssue && (
           <div style={styles.field}>
             <label style={styles.label}>PROVIDER / MODEL</label>
             <div style={styles.providerRow}>
-              {(['anthropic', 'openai', 'gemini'] as Provider[]).map((p) => (
-                <button
-                  key={p}
-                  style={{
-                    ...styles.providerBtn,
-                    borderColor: provider === p ? 'var(--accent)' : 'var(--border-mid)',
-                    color: provider === p ? 'var(--accent)' : 'var(--fg-muted)',
-                    background: provider === p ? 'var(--accent-flat)' : 'transparent',
-                  }}
-                  onClick={() => handleProviderChange(p)}
-                >
-                  {p.toUpperCase()}
-                </button>
-              ))}
+              <button
+                style={{
+                  ...styles.providerBtn,
+                  borderColor: 'var(--accent)',
+                  color: 'var(--accent)',
+                  background: 'var(--accent-flat)',
+                }}
+              >
+                ANTHROPIC
+              </button>
+              <button
+                style={{
+                  ...styles.providerBtn,
+                  borderColor: 'var(--border-mid)',
+                  color: 'var(--fg-muted)',
+                  opacity: 0.5,
+                  cursor: 'not-allowed',
+                }}
+                disabled
+              >
+                CODEX <span style={styles.comingSoon}>Soon</span>
+              </button>
+              <button
+                style={{
+                  ...styles.providerBtn,
+                  borderColor: 'var(--border-mid)',
+                  color: 'var(--fg-muted)',
+                  opacity: 0.5,
+                  cursor: 'not-allowed',
+                }}
+                disabled
+              >
+                GEMINI <span style={styles.comingSoon}>Soon</span>
+              </button>
             </div>
             <select
               style={styles.select}
               value={model}
               onChange={(e) => setModel(e.target.value)}
             >
-              {MOCK_MODELS[provider].map((m) => (
+              {MODELS.anthropic.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
@@ -156,15 +273,15 @@ export default function CreateRun() {
         )}
 
         {/* Summary & Submit */}
-        {repo && issue && (
+        {selectedRepo && selectedIssue && (
           <div style={styles.summary}>
             <div style={styles.summaryLine}>
               <span style={styles.summaryLabel}>Repo:</span>
-              <span style={styles.summaryValue}>{repo}</span>
+              <span style={styles.summaryValue}>{selectedRepo}</span>
             </div>
             <div style={styles.summaryLine}>
               <span style={styles.summaryLabel}>Issue:</span>
-              <span style={styles.summaryValue}>#{issue.number} — {issue.title}</span>
+              <span style={styles.summaryValue}>#{selectedIssue.number} &mdash; {selectedIssue.title}</span>
             </div>
             <div style={styles.summaryLine}>
               <span style={styles.summaryLabel}>Agent:</span>
@@ -255,10 +372,22 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: '0.12em',
     color: 'var(--fg-muted)',
   },
+  searchInput: {
+    padding: '8px 12px',
+    background: 'var(--bg2)',
+    color: 'var(--fg)',
+    border: '1px solid var(--border-mid)',
+    borderRadius: '4px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
+    outline: 'none',
+  },
   optionList: {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+    maxHeight: '300px',
+    overflowY: 'auto',
   },
   optionBtn: {
     display: 'flex',
@@ -276,6 +405,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-mono)',
     fontSize: '13px',
     fontWeight: 500,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  privateBadge: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '9px',
+    letterSpacing: '0.08em',
+    padding: '1px 5px',
+    border: '1px solid var(--border-mid)',
+    borderRadius: '3px',
+    color: 'var(--fg-muted)',
   },
   optionMeta: {
     fontFamily: 'var(--font-mono)',
@@ -288,6 +429,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '12px',
     color: 'var(--fg-muted)',
     padding: '16px 0',
+  },
+  loadMoreBtn: {
+    padding: '8px',
+    background: 'transparent',
+    color: 'var(--accent)',
+    border: '1px dashed var(--border-mid)',
+    borderRadius: '4px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '11px',
+    cursor: 'pointer',
+    letterSpacing: '0.06em',
   },
   issueRow: {
     display: 'flex',
@@ -336,6 +488,11 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     background: 'transparent',
     transition: 'all 150ms ease',
+  },
+  comingSoon: {
+    fontSize: '8px',
+    opacity: 0.6,
+    marginLeft: '4px',
   },
   select: {
     padding: '8px 12px',

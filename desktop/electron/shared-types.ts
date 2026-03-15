@@ -1,6 +1,29 @@
 // Shared types used by both electron main process and renderer.
 // Keep in sync with src/lib/types.ts
 
+export interface GitHubUser {
+  login: string
+  avatar_url: string
+  name: string | null
+}
+
+export interface GitHubRepo {
+  id: number
+  full_name: string
+  description: string | null
+  language: string | null
+  open_issues_count: number
+  private: boolean
+}
+
+export interface GitHubIssue {
+  number: number
+  title: string
+  body: string | null
+  labels: Array<{ name: string; color: string }>
+  created_at: string
+}
+
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -52,7 +75,7 @@ export interface SettingsData {
     pr_opened: boolean
   }
   polling_interval: number
-  github_token: string
+  monitored_repos: string[]
 }
 
 export interface CreateRunParams {

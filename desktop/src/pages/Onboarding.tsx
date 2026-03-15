@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MOCK_REPOSITORIES, MOCK_MODELS } from '../lib/mocks'
-import type { Provider } from '../lib/types'
+import { getGitHubRepos, getConfig, saveConfig } from '../lib/ipc'
+import type { GitHubRepo } from '../lib/types'
 
 type Step = 'repos' | 'agent' | 'done'
 
@@ -11,12 +11,26 @@ const STEPS: { key: Step; label: string }[] = [
   { key: 'done', label: 'All Set' },
 ]
 
+const MODELS: Record<string, string[]> = {
+  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'],
+}
+
 export default function Onboarding() {
   const navigate = useNavigate()
   const [currentStep, setCurrentStep] = useState<Step>('repos')
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
-  const [provider, setProvider] = useState<Provider>('anthropic')
   const [model, setModel] = useState('claude-sonnet-4-6')
+  const [repos, setRepos] = useState<GitHubRepo[]>([])
+  const [reposLoading, setReposLoading] = useState(true)
+
+  useEffect(() => {
+    getGitHubRepos()
+      .then((r) => {
+        setRepos(r)
+        setReposLoading(false)
+      })
+      .catch(() => setReposLoading(false))
+  }, [])
 
   const stepIndex = STEPS.findIndex((s) => s.key === currentStep)
 
@@ -29,10 +43,7 @@ export default function Onboarding() {
     })
   }
 
-  const handleProviderChange = (p: Provider) => {
-    setProvider(p)
-    setModel(MOCK_MODELS[p][0])
-  }
+  const provider = 'anthropic'
 
   return (
     <div style={styles.page}>
@@ -68,7 +79,9 @@ export default function Onboarding() {
               Auto-Issue will watch these repos for issues labeled <span style={styles.labelBadge}>auto-issue</span>
             </p>
             <div style={styles.repoList}>
-              {MOCK_REPOSITORIES.map((repo) => (
+              {reposLoading ? (
+                <div style={styles.subtitle}>Loading repositories from GitHub...</div>
+              ) : repos.map((repo) => (
                 <div
                   key={repo.id}
                   style={{
@@ -83,9 +96,9 @@ export default function Onboarding() {
                       {selectedRepos.has(repo.full_name) ? '◉' : '○'}
                     </span>
                     <span style={styles.repoName}>{repo.full_name}</span>
-                    <span style={styles.repoLang}>{repo.language}</span>
+                    <span style={styles.repoLang}>{repo.language ?? ''}</span>
                   </div>
-                  <div style={styles.repoDesc}>{repo.description}</div>
+                  <div style={styles.repoDesc}>{repo.description ?? 'No description'}</div>
                 </div>
               ))}
             </div>
@@ -115,27 +128,47 @@ export default function Onboarding() {
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>PROVIDER</label>
               <div style={styles.providerGrid}>
-                {(['anthropic', 'openai', 'gemini'] as Provider[]).map((p) => (
-                  <button
-                    key={p}
-                    style={{
-                      ...styles.providerBtn,
-                      borderColor: provider === p ? 'var(--accent)' : 'var(--border-mid)',
-                      color: provider === p ? 'var(--accent)' : 'var(--fg-muted)',
-                      background: provider === p ? 'var(--accent-flat)' : 'transparent',
-                    }}
-                    onClick={() => handleProviderChange(p)}
-                  >
-                    {p.toUpperCase()}
-                  </button>
-                ))}
+                <button
+                  style={{
+                    ...styles.providerBtn,
+                    borderColor: 'var(--accent)',
+                    color: 'var(--accent)',
+                    background: 'var(--accent-flat)',
+                  }}
+                >
+                  ANTHROPIC
+                </button>
+                <button
+                  style={{
+                    ...styles.providerBtn,
+                    borderColor: 'var(--border-mid)',
+                    color: 'var(--fg-muted)',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                  }}
+                  disabled
+                >
+                  CODEX (Soon)
+                </button>
+                <button
+                  style={{
+                    ...styles.providerBtn,
+                    borderColor: 'var(--border-mid)',
+                    color: 'var(--fg-muted)',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                  }}
+                  disabled
+                >
+                  GEMINI (Soon)
+                </button>
               </div>
             </div>
 
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>MODEL</label>
               <div style={styles.modelList}>
-                {MOCK_MODELS[provider].map((m) => (
+                {MODELS.anthropic.map((m) => (
                   <button
                     key={m}
                     style={{
@@ -156,7 +189,17 @@ export default function Onboarding() {
               <button style={styles.secondaryBtn} onClick={() => setCurrentStep('repos')}>
                 Back
               </button>
-              <button style={styles.primaryBtn} onClick={() => setCurrentStep('done')}>
+              <button style={styles.primaryBtn} onClick={async () => {
+                // Save monitored repos and default model to config
+                const config = await getConfig()
+                await saveConfig({
+                  ...config,
+                  monitored_repos: [...selectedRepos],
+                  default_provider: 'anthropic',
+                  default_model: model,
+                })
+                setCurrentStep('done')
+              }}>
                 Finish Setup
               </button>
             </div>

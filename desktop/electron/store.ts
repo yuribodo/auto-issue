@@ -47,7 +47,7 @@ const DEFAULT_CONFIG: SettingsData = {
   api_keys: { openai: '', anthropic: '', gemini: '' },
   notifications: { approval_needed: true, run_failed: true, pr_opened: false },
   polling_interval: 5,
-  github_token: '',
+  monitored_repos: [],
 }
 
 export function loadConfig(): SettingsData {

@@ -366,7 +366,7 @@ export const MOCK_SETTINGS: SettingsData = {
     pr_opened: false,
   },
   polling_interval: 5,
-  github_token: '',
+  monitored_repos: [],
 }
 
 export const MOCK_MODELS: Record<string, string[]> = {

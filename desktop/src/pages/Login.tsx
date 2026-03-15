@@ -1,16 +1,17 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../App'
 
 export default function Login() {
   const navigate = useNavigate()
+  const { user, loading } = useAuth()
 
+  // If already authenticated, redirect to dashboard
   useEffect(() => {
-    const unsub = window.electronAPI.on('auth:success', (...args: unknown[]) => {
-      const isNewUser = args[0] as boolean | undefined
-      navigate(isNewUser ? '/onboarding' : '/dashboard')
-    })
-    return unsub
-  }, [navigate])
+    if (!loading && user) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [user, loading, navigate])
 
   const handleLogin = () => {
     window.electronAPI.invoke('auth:login')

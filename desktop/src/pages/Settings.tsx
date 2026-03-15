@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MOCK_REPOSITORIES, MOCK_MODELS } from '../lib/mocks'
-import { getConfig, saveConfig, testRun } from '../lib/ipc'
-import type { Provider, SettingsData, Repository } from '../lib/types'
+import { getConfig, saveConfig, testRun, getGitHubRepos } from '../lib/ipc'
+import type { Provider, SettingsData, GitHubRepo } from '../lib/types'
 
 type Tab = 'repos' | 'agents' | 'notifications' | 'general'
 
@@ -13,16 +12,27 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'general', label: 'GENERAL' },
 ]
 
+const MODELS: Record<string, string[]> = {
+  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'],
+}
+
 export default function Settings() {
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('repos')
   const [settings, setSettings] = useState<SettingsData | null>(null)
-  const [repos, setRepos] = useState<Repository[]>(MOCK_REPOSITORIES)
+  const [repos, setRepos] = useState<GitHubRepo[]>([])
+  const [reposLoading, setReposLoading] = useState(true)
   const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
 
   useEffect(() => {
     getConfig().then(setSettings)
+    getGitHubRepos()
+      .then((r) => {
+        setRepos(r)
+        setReposLoading(false)
+      })
+      .catch(() => setReposLoading(false))
   }, [])
 
   const handleSave = async () => {
@@ -42,12 +52,13 @@ export default function Settings() {
     )
   }
 
-  const toggleRepo = (id: string) => {
-    setRepos((prev) =>
-      prev.map((r) =>
-        r.id === id ? { ...r, is_monitored: !r.is_monitored } : r
-      )
-    )
+  const monitoredRepos = settings.monitored_repos ?? []
+
+  const toggleRepo = (fullName: string) => {
+    const updated = monitoredRepos.includes(fullName)
+      ? monitoredRepos.filter((r) => r !== fullName)
+      : [...monitoredRepos, fullName]
+    updateSettings({ monitored_repos: updated })
   }
 
   const updateSettings = (updates: Partial<SettingsData>) => {
@@ -55,11 +66,14 @@ export default function Settings() {
   }
 
   const handleProviderChange = (p: Provider) => {
+    const models = MODELS[p]
     updateSettings({
       default_provider: p,
-      default_model: MOCK_MODELS[p][0],
+      default_model: models ? models[0] : '',
     })
   }
+
+  const currentModels = MODELS[settings.default_provider] ?? []
 
   return (
     <div style={styles.page}>
@@ -101,34 +115,38 @@ export default function Settings() {
             <p style={styles.sectionDesc}>
               Manage which repositories Auto-Issue monitors for labeled issues.
             </p>
-            <div style={styles.repoList}>
-              {repos.map((repo) => (
-                <div key={repo.id} style={styles.repoRow}>
-                  <div style={styles.repoInfo}>
-                    <span style={styles.repoName}>{repo.full_name}</span>
-                    <span style={styles.repoDesc}>{repo.description}</span>
-                  </div>
-                  <div style={styles.repoRight}>
-                    <span style={styles.repoLang}>{repo.language}</span>
-                    <span style={styles.repoIssues}>{repo.open_issues_count} issues</span>
-                    <button
-                      style={{
-                        ...styles.toggleBtn,
-                        background: repo.is_monitored ? 'var(--accent)' : 'var(--bg3)',
-                      }}
-                      onClick={() => toggleRepo(repo.id)}
-                    >
-                      <span
+            {reposLoading ? (
+              <div style={styles.sectionDesc}>Loading repositories from GitHub...</div>
+            ) : (
+              <div style={styles.repoList}>
+                {repos.map((repo) => (
+                  <div key={repo.id} style={styles.repoRow}>
+                    <div style={styles.repoInfo}>
+                      <span style={styles.repoName}>{repo.full_name}</span>
+                      <span style={styles.repoDesc}>{repo.description ?? 'No description'}</span>
+                    </div>
+                    <div style={styles.repoRight}>
+                      <span style={styles.repoLang}>{repo.language ?? ''}</span>
+                      <span style={styles.repoIssues}>{repo.open_issues_count} issues</span>
+                      <button
                         style={{
-                          ...styles.toggleDot,
-                          transform: repo.is_monitored ? 'translateX(14px)' : 'translateX(0)',
+                          ...styles.toggleBtn,
+                          background: monitoredRepos.includes(repo.full_name) ? 'var(--accent)' : 'var(--bg3)',
                         }}
-                      />
-                    </button>
+                        onClick={() => toggleRepo(repo.full_name)}
+                      >
+                        <span
+                          style={{
+                            ...styles.toggleDot,
+                            transform: monitoredRepos.includes(repo.full_name) ? 'translateX(14px)' : 'translateX(0)',
+                          }}
+                        />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -142,20 +160,41 @@ export default function Settings() {
             <div style={styles.fieldGroup}>
               <label style={styles.fieldLabel}>DEFAULT PROVIDER</label>
               <div style={styles.providerGrid}>
-                {(['anthropic', 'openai', 'gemini'] as Provider[]).map((p) => (
-                  <button
-                    key={p}
-                    style={{
-                      ...styles.providerBtn,
-                      borderColor: settings.default_provider === p ? 'var(--accent)' : 'var(--border-mid)',
-                      color: settings.default_provider === p ? 'var(--accent)' : 'var(--fg-muted)',
-                      background: settings.default_provider === p ? 'var(--accent-flat)' : 'transparent',
-                    }}
-                    onClick={() => handleProviderChange(p)}
-                  >
-                    {p.toUpperCase()}
-                  </button>
-                ))}
+                <button
+                  style={{
+                    ...styles.providerBtn,
+                    borderColor: settings.default_provider === 'anthropic' ? 'var(--accent)' : 'var(--border-mid)',
+                    color: settings.default_provider === 'anthropic' ? 'var(--accent)' : 'var(--fg-muted)',
+                    background: settings.default_provider === 'anthropic' ? 'var(--accent-flat)' : 'transparent',
+                  }}
+                  onClick={() => handleProviderChange('anthropic')}
+                >
+                  ANTHROPIC
+                </button>
+                <button
+                  style={{
+                    ...styles.providerBtn,
+                    borderColor: 'var(--border-mid)',
+                    color: 'var(--fg-muted)',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                  }}
+                  disabled
+                >
+                  CODEX (Soon)
+                </button>
+                <button
+                  style={{
+                    ...styles.providerBtn,
+                    borderColor: 'var(--border-mid)',
+                    color: 'var(--fg-muted)',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                  }}
+                  disabled
+                >
+                  GEMINI (Soon)
+                </button>
               </div>
             </div>
 
@@ -166,43 +205,10 @@ export default function Settings() {
                 value={settings.default_model}
                 onChange={(e) => updateSettings({ default_model: e.target.value })}
               >
-                {MOCK_MODELS[settings.default_provider].map((m) => (
+                {currentModels.map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>API KEYS</label>
-              {(['openai', 'anthropic', 'gemini'] as Provider[]).map((p) => (
-                <div key={p} style={styles.keyRow}>
-                  <span style={styles.keyLabel}>{p.toUpperCase()}</span>
-                  <input
-                    style={styles.keyInput}
-                    type="password"
-                    value={settings.api_keys[p]}
-                    onChange={(e) =>
-                      updateSettings({
-                        api_keys: { ...settings.api_keys, [p]: e.target.value },
-                      })
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div style={styles.fieldGroup}>
-              <label style={styles.fieldLabel}>GITHUB TOKEN</label>
-              <p style={styles.sectionDesc}>
-                Personal access token used to clone private repositories.
-              </p>
-              <input
-                style={styles.keyInput}
-                type="password"
-                placeholder="ghp_..."
-                value={settings.github_token}
-                onChange={(e) => updateSettings({ github_token: e.target.value })}
-              />
             </div>
 
             <div style={styles.testSection}>
@@ -210,7 +216,6 @@ export default function Settings() {
                 <label style={styles.fieldLabel}>TEST AGENT</label>
                 <p style={styles.sectionDesc}>
                   Run a quick test to verify the CLI is installed and your API key works.
-                  Sends a simple prompt and streams the output in the terminal.
                 </p>
               </div>
               <button

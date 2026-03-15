@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MOCK_RUNS } from '../lib/mocks'
+import { getRuns } from '../lib/ipc'
 import type { Run, RunStatus, Provider } from '../lib/types'
 import ProviderBadge from '../components/ProviderBadge'
 
@@ -13,41 +13,47 @@ const STATUS_COLORS: Record<RunStatus, string> = {
   failed: 'var(--red)',
 }
 
-const ALL_REPOS = [...new Set(MOCK_RUNS.map((r) => r.repo))]
 const ALL_STATUSES: RunStatus[] = ['queued', 'running', 'awaiting_approval', 'done', 'failed']
 const ALL_PROVIDERS: Provider[] = ['anthropic', 'openai', 'gemini']
 
 export default function History() {
   const navigate = useNavigate()
+  const [runs, setRuns] = useState<Run[]>([])
   const [search, setSearch] = useState('')
   const [filterRepo, setFilterRepo] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<string>('')
   const [filterProvider, setFilterProvider] = useState<string>('')
 
+  useEffect(() => {
+    getRuns().then(setRuns).catch(console.error)
+  }, [])
+
+  const allRepos = useMemo(() => [...new Set(runs.map((r) => r.repo))], [runs])
+
   const filteredRuns = useMemo(() => {
-    let runs = [...MOCK_RUNS]
+    let filtered = [...runs]
 
     if (search) {
       const q = search.toLowerCase()
-      runs = runs.filter(
+      filtered = filtered.filter(
         (r) =>
           r.issue_title.toLowerCase().includes(q) ||
           String(r.issue_number).includes(q)
       )
     }
     if (filterRepo) {
-      runs = runs.filter((r) => r.repo === filterRepo)
+      filtered = filtered.filter((r) => r.repo === filterRepo)
     }
     if (filterStatus) {
-      runs = runs.filter((r) => r.status === filterStatus)
+      filtered = filtered.filter((r) => r.status === filterStatus)
     }
     if (filterProvider) {
-      runs = runs.filter((r) => r.provider === filterProvider)
+      filtered = filtered.filter((r) => r.provider === filterProvider)
     }
 
-    runs.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
-    return runs
-  }, [search, filterRepo, filterStatus, filterProvider])
+    filtered.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+    return filtered
+  }, [runs, search, filterRepo, filterStatus, filterProvider])
 
   const formatDate = (iso: string) => {
     const d = new Date(iso)
@@ -97,7 +103,7 @@ export default function History() {
           onChange={(e) => setFilterRepo(e.target.value)}
         >
           <option value="">All repos</option>
-          {ALL_REPOS.map((r) => (
+          {allRepos.map((r) => (
             <option key={r} value={r}>{r}</option>
           ))}
         </select>
