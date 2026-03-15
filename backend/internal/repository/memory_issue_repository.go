@@ -12,9 +12,8 @@ import (
 
 // MemoryIssueRepository is an in-memory IssueRepository used for testing.
 type MemoryIssueRepository struct {
-	mu        sync.RWMutex
-	issues    map[string]*models.Issue
-	runCounter int
+	mu     sync.RWMutex
+	issues map[string]*models.Issue
 }
 
 // NewMemoryIssueRepository creates a new in-memory issue repository.
@@ -27,6 +26,16 @@ func NewMemoryIssueRepository() *MemoryIssueRepository {
 // Compile-time interface verification.
 var _ IssueRepository = (*MemoryIssueRepository)(nil)
 
+func (r *MemoryIssueRepository) nextRunNumber(githubUser string) int {
+	maxNum := 0
+	for _, iss := range r.issues {
+		if iss.GithubUser == githubUser && iss.RunNumber > maxNum {
+			maxNum = iss.RunNumber
+		}
+	}
+	return maxNum + 1
+}
+
 func (r *MemoryIssueRepository) Create(_ context.Context, id, title, description, repoPath, githubUser string) (*models.Issue, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -35,10 +44,9 @@ func (r *MemoryIssueRepository) Create(_ context.Context, id, title, description
 		return nil, fmt.Errorf("issue %q already exists", id)
 	}
 
-	r.runCounter++
 	issue := &models.Issue{
 		IssueID:     id,
-		RunNumber:  r.runCounter,
+		RunNumber:  r.nextRunNumber(githubUser),
 		GithubUser: githubUser,
 		Title:       title,
 		Description: description,
@@ -167,10 +175,9 @@ func (r *MemoryIssueRepository) CreateWithGithub(_ context.Context, id, title, d
 		return nil, fmt.Errorf("issue %q already exists", id)
 	}
 
-	r.runCounter++
 	issue := &models.Issue{
 		IssueID:     id,
-		RunNumber:  r.runCounter,
+		RunNumber:  r.nextRunNumber(githubUser),
 		GithubUser: githubUser,
 		Title:       title,
 		Description: description,

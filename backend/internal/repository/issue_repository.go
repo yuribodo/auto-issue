@@ -41,16 +41,16 @@ func NewPGIssueRepository(db *gorm.DB) *PGIssueRepository {
 // Compile-time interface verification.
 var _ IssueRepository = (*PGIssueRepository)(nil)
 
-func (r *PGIssueRepository) nextRunNumber(ctx context.Context) int {
+func (r *PGIssueRepository) nextRunNumber(ctx context.Context, githubUser string) int {
 	var maxNum int
-	r.db.WithContext(ctx).Model(&models.Issue{}).Select("COALESCE(MAX(run_number), 0)").Scan(&maxNum)
+	r.db.WithContext(ctx).Model(&models.Issue{}).Where("github_user = ?", githubUser).Select("COALESCE(MAX(run_number), 0)").Scan(&maxNum)
 	return maxNum + 1
 }
 
 func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, repoPath, githubUser string) (*models.Issue, error) {
 	issue := models.Issue{
 		IssueID:    id,
-		RunNumber:  r.nextRunNumber(ctx),
+		RunNumber:  r.nextRunNumber(ctx, githubUser),
 		GithubUser: githubUser,
 		Title:       title,
 		Description: description,
@@ -68,7 +68,7 @@ func (r *PGIssueRepository) Create(ctx context.Context, id, title, description, 
 func (r *PGIssueRepository) CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int, githubUser string) (*models.Issue, error) {
 	issue := models.Issue{
 		IssueID:     id,
-		RunNumber:  r.nextRunNumber(ctx),
+		RunNumber:  r.nextRunNumber(ctx, githubUser),
 		GithubUser: githubUser,
 		Title:       title,
 		Description: description,
