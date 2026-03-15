@@ -236,13 +236,24 @@ function registerIpcHandlers() {
 
     await backendApproveRun(id)
     unsubscribeFromRunEvents(id)
-    // Update local cache
-    const runs = loadRuns()
-    const run = runs.find((r) => r.id === id)
-    if (run) {
-      run.status = 'done'
-      run.finished_at = new Date().toISOString()
-      persistRuns(runs)
+    // Refetch from backend to get full data (pr_url, cost, etc.)
+    try {
+      const fresh = await backendGetRun(id)
+      if (fresh) {
+        const runs = loadRuns()
+        const idx = runs.findIndex((r) => r.id === id)
+        if (idx >= 0) runs[idx] = fresh
+        persistRuns(runs)
+      }
+    } catch {
+      // Fallback: update cache minimally
+      const runs = loadRuns()
+      const run = runs.find((r) => r.id === id)
+      if (run) {
+        run.status = 'done'
+        run.finished_at = new Date().toISOString()
+        persistRuns(runs)
+      }
     }
   })
 
@@ -259,12 +270,22 @@ function registerIpcHandlers() {
       return
     }
     await backendSubmitFeedback(id, feedback || 'Rejected by user — please fix the issues and try again.')
-    // Update local cache
-    const runs = loadRuns()
-    const run = runs.find((r) => r.id === id)
-    if (run) {
-      run.status = 'running'
-      persistRuns(runs)
+    // Refetch from backend to get full data
+    try {
+      const fresh = await backendGetRun(id)
+      if (fresh) {
+        const runs = loadRuns()
+        const idx = runs.findIndex((r) => r.id === id)
+        if (idx >= 0) runs[idx] = fresh
+        persistRuns(runs)
+      }
+    } catch {
+      const runs = loadRuns()
+      const run = runs.find((r) => r.id === id)
+      if (run) {
+        run.status = 'running'
+        persistRuns(runs)
+      }
     }
     // Re-subscribe to SSE since the agent will restart
     subscribeToRunEvents(id)
