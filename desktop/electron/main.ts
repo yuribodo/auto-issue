@@ -73,8 +73,13 @@ function createWindow() {
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
+    const indexPath = path.join(__dirname, '../dist/index.html')
+    console.log('[main] Loading index from:', indexPath)
+    mainWindow.loadFile(indexPath).catch((err) => {
+      console.error('[main] Failed to load index.html:', err)
+    })
   }
+
 
   // Force external links to open in the default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

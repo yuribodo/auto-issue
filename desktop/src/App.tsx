@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { getMe } from './lib/ipc'
 import type { User } from './lib/types'
 import Login from './pages/Login'
@@ -102,9 +102,9 @@ export function App() {
 
   return (
     <AuthContext.Provider value={{ user, setUser, loading }}>
-      <BrowserRouter>
+      <HashRouter>
         <AuthRouter />
-      </BrowserRouter>
+      </HashRouter>
     </AuthContext.Provider>
   )
 }
