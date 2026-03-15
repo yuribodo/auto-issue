@@ -2,9 +2,14 @@
 // Translates between desktop Run types and backend Issue types.
 
 import http from 'node:http'
+import https from 'node:https'
 import type { Run, SSEEvent, CreateRunParams } from './shared-types'
 
-let BACKEND_URL = process.env.BACKEND_URL || ''
+function httpModule(url: URL) {
+  return url.protocol === 'https:' ? https : http
+}
+
+let BACKEND_URL = process.env.BACKEND_URL || 'https://auto-issue.onrender.com'
 export function setBackendUrl(url: string): void { BACKEND_URL = url }
 
 // Auth token getter — set by main process so backend requests carry the user's GitHub token
@@ -19,10 +24,10 @@ function request(method: string, path: string, body?: unknown): Promise<any> {
     const payload = body ? JSON.stringify(body) : undefined
 
     const token = authTokenGetter?.()
-    const req = http.request(
+    const req = httpModule(url).request(
       {
         hostname: url.hostname,
-        port: url.port,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname + url.search,
         method,
         headers: {
@@ -183,14 +188,18 @@ export function backendSubscribeSSE(
     if (closed) return
 
     const url = new URL(`/api/v1/issues/${issueId}/events`, BACKEND_URL)
+    const token = authTokenGetter?.()
 
-    req = http.request(
+    req = httpModule(url).request(
       {
         hostname: url.hostname,
-        port: url.port,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname,
         method: 'GET',
-        headers: { Accept: 'text/event-stream' },
+        headers: {
+          Accept: 'text/event-stream',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
       },
       (res) => {
         let buffer = ''
