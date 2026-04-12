@@ -1,4 +1,3 @@
-// Package service contains business logic for the auto-issue application.
 package service
 
 import (
@@ -16,20 +15,15 @@ import (
 	"auto-issue/internal/workspace"
 )
 
-// EventBroadcaster defines the interface for broadcasting agent events.
-// Defined here to avoid import cycles with the api package.
 type EventBroadcaster interface {
 	Broadcast(issueID string, event agent.AgentEvent)
 }
 
-// IssueRequest represents an issue enqueued for processing.
 type IssueRequest struct {
 	IssueID string
-	GHToken string // per-request GitHub token from the user's OAuth session
+	GHToken string
 }
 
-// Orchestrator coordinates the issue lifecycle by dispatching work
-// to the agent runner and managing phase transitions.
 type Orchestrator struct {
 	workspace   *workspace.Manager
 	issues      repository.IssueRepository
@@ -38,15 +32,14 @@ type Orchestrator struct {
 	broadcaster EventBroadcaster
 	ghToken     string
 	queue       chan IssueRequest
-	sem         chan struct{} // concurrency limiter
+	sem         chan struct{}
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
 	mu          sync.Mutex
-	cancels     map[string]context.CancelFunc // per-issue cancel functions
+	cancels     map[string]context.CancelFunc
 }
 
-// NewOrchestrator creates an Orchestrator wired to the given dependencies.
 func NewOrchestrator(ws *workspace.Manager, issues repository.IssueRepository, defaultCfg config.AgentConfig, apiKeys map[string]string, broadcaster EventBroadcaster, ghToken string, maxConcurrency int) *Orchestrator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Orchestrator{
@@ -64,18 +57,14 @@ func NewOrchestrator(ws *workspace.Manager, issues repository.IssueRepository, d
 	}
 }
 
-// Start begins consuming from the work queue.
 func (o *Orchestrator) Start() {
 	go o.consumeLoop()
 }
 
-// Enqueue adds an issue to the work queue.
-// ghToken is the user's GitHub OAuth token; if empty, falls back to the server-wide token.
 func (o *Orchestrator) Enqueue(issueID string, ghToken string) {
 	o.queue <- IssueRequest{IssueID: issueID, GHToken: ghToken}
 }
 
-// CancelIssue cancels a running issue's agent process and transitions it to failed.
 func (o *Orchestrator) CancelIssue(issueID string) bool {
 	o.mu.Lock()
 	cancelFn, ok := o.cancels[issueID]
@@ -87,7 +76,6 @@ func (o *Orchestrator) CancelIssue(issueID string) bool {
 	return false
 }
 
-// Shutdown stops accepting new work and waits for active workers to finish.
 func (o *Orchestrator) Shutdown() {
 	o.cancel()
 	close(o.queue)
@@ -126,12 +114,10 @@ func (o *Orchestrator) broadcastEvent(issueID string, eventType agent.AgentEvent
 }
 
 func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
-	// Fall back to server-wide token if no per-request token provided
 	if ghToken == "" {
 		ghToken = o.ghToken
 	}
 
-	// Create per-issue context for cancellation
 	issueCtx, issueCancel := context.WithCancel(o.ctx)
 	defer issueCancel()
 
@@ -153,7 +139,6 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 		return fmt.Errorf("issue %s is in phase %s, expected developing", issueID, issue.Phase)
 	}
 
-	// Resolve agent type and model (per-issue overrides global default)
 	agentType := issue.AgentType
 	if agentType == "" {
 		agentType = o.defaultCfg.Type
@@ -179,13 +164,10 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 
 	o.broadcastEvent(issueID, agent.EventStatus, "INFO", "Preparing workspace...")
 
-	// Step 1: Create or reuse workspace
 	var wsPath string
 	if issue.GithubRepo != "" {
-		// Remote GitHub repo — use worktree from cached clone
 		wsPath, err = o.workspace.CreateFromRemote(issueID, issue.GithubRepo, ghToken)
 	} else {
-		// Local repo — use worktree from local path
 		wsPath, err = o.workspace.Create(issueID, issue.RepoPath)
 	}
 	if err != nil {
@@ -200,16 +182,13 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 		return fmt.Errorf("starting development: %w", err)
 	}
 
-	// Step 2: Build prompt with issue context + any feedback
 	prompt := buildIssuePrompt(issue)
 
-	// Step 3: Run agent in developing mode with streaming
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "developing")
 	slog.Info("starting development", "issue", issueID, "iteration", issue.Iteration)
 
 	devResult, err := o.runAgentStreaming(issueCtx, issueID, provider, wsPath, "developing", prompt)
 	if err != nil {
-		// Use background context for DB writes since issueCtx may be cancelled
 		bgCtx := context.Background()
 		o.issues.UpdateOutput(bgCtx, issueID, devResult.Output, err.Error())
 		o.issues.Transition(bgCtx, issueID, constants.PhaseFailed)
@@ -222,7 +201,6 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 
 	o.issues.UpdateOutput(issueCtx, issueID, devResult.Output, fmt.Sprintf("Development completed in %s", devResult.Duration))
 
-	// Save PR URL and cost if detected during development
 	if devResult.PRURL != "" {
 		o.issues.UpdatePR(issueCtx, issueID, devResult.PRURL)
 	}
@@ -230,13 +208,11 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 		o.issues.UpdateCost(issueCtx, issueID, devResult.CostUSD, devResult.Turns)
 	}
 
-	// Step 4: Transition to code reviewing
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "code_reviewing")
 	if err := o.issues.Transition(issueCtx, issueID, constants.PhaseCodeReviewing); err != nil {
 		return fmt.Errorf("transition to code_reviewing: %w", err)
 	}
 
-	// Step 5: Run agent in code review mode with streaming
 	slog.Info("starting code review", "issue", issueID)
 	reviewResult, err := o.runAgentStreaming(issueCtx, issueID, provider, wsPath, "code_reviewing", prompt)
 	if err != nil {
@@ -250,22 +226,18 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 		return fmt.Errorf("code review run: %w", err)
 	}
 
-	// Append review output to existing output
 	combinedOutput := devResult.Output + "\n\n---\n\n# Code Review\n\n" + reviewResult.Output
 	combinedLogs := fmt.Sprintf("Development: %s\nCode Review: %s", devResult.Duration, reviewResult.Duration)
 	o.issues.UpdateOutput(issueCtx, issueID, combinedOutput, combinedLogs)
 
-	// Update total cost (dev + review)
 	totalCost := devResult.CostUSD + reviewResult.CostUSD
 	totalTurns := devResult.Turns + reviewResult.Turns
 	o.issues.UpdateCost(issueCtx, issueID, totalCost, totalTurns)
 
-	// Save PR URL if detected during review
 	if reviewResult.PRURL != "" && devResult.PRURL == "" {
 		o.issues.UpdatePR(issueCtx, issueID, reviewResult.PRURL)
 	}
 
-	// Step 6: Move to human review
 	o.broadcastEvent(issueID, agent.EventStatus, "PHASE", "human_review")
 	if err := o.issues.Transition(issueCtx, issueID, constants.PhaseHumanReview); err != nil {
 		return fmt.Errorf("transition to human_review: %w", err)
@@ -278,14 +250,12 @@ func (o *Orchestrator) processIssue(issueID string, ghToken string) error {
 	return nil
 }
 
-// runAgentStreaming runs the agent and broadcasts all events to SSE subscribers.
 func (o *Orchestrator) runAgentStreaming(ctx context.Context, issueID string, provider agent.ProviderRunner, wsPath string, mode string, prompt string) (agent.RunResult, error) {
 	events, resultCh, err := provider.RunStreaming(ctx, wsPath, mode, prompt)
 	if err != nil {
 		return agent.RunResult{}, err
 	}
 
-	// Forward all events to broadcaster
 	for evt := range events {
 		if o.broadcaster != nil {
 			o.broadcaster.Broadcast(issueID, evt)
@@ -301,7 +271,6 @@ func (o *Orchestrator) runAgentStreaming(ctx context.Context, issueID string, pr
 }
 
 func buildIssuePrompt(issue *models.Issue) string {
-	// Use GitHub-aware prompt when we have GitHub repo info
 	if issue.GithubRepo != "" && issue.IssueNumber > 0 {
 		prompt := fmt.Sprintf(`You are working on the repository %s. Fix GitHub issue #%d.
 
@@ -331,7 +300,6 @@ Use `+"`"+`gh pr create --title "Fix #%d: %s" --body "Closes #%d"`+"`"+` to crea
 		return prompt
 	}
 
-	// Fallback: original simple prompt for local repos
 	prompt := fmt.Sprintf("# Issue: %s\n\n%s", issue.Title, issue.Description)
 
 	if issue.LastFeedback != "" {

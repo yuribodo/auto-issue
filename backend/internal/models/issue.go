@@ -2,7 +2,6 @@ package models
 
 import "time"
 
-// Issue is the GORM model for the issues table.
 type Issue struct {
 	IssueID       string     `json:"id" gorm:"primaryKey;column:issue_id"`
 	RunNumber     int        `json:"run_number" gorm:"not null;default:0"`

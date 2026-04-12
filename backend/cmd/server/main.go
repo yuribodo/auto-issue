@@ -40,8 +40,6 @@ func main() {
 	}
 }
 
-// runAPIMode starts the API-only server connected to PostgreSQL.
-// No orchestrator or agent execution — used on Render.
 func runAPIMode() {
 	slog.Info("starting in API mode (remote database, no agent execution)")
 
@@ -69,13 +67,10 @@ func runAPIMode() {
 
 	applyPortOverride(cfg)
 
-	// API mode: no orchestrator, no broadcaster
 	handler := api.NewHandler(issueRepo, configRepo, nil, cfg, nil)
 	startServer(handler, cfg.APIPort, nil)
 }
 
-// runAgentMode starts the local agent runner that talks to the remote API.
-// Runs orchestrator, workspace manager, and agents locally.
 func runAgentMode() {
 	slog.Info("starting in agent mode (remote API, local agent execution)")
 
@@ -93,26 +88,21 @@ func runAgentMode() {
 		slog.Info("GitHub token configured")
 	}
 
-	// Use default config (no database to load from)
 	cfg := config.Default()
 	applyPortOverride(cfg)
 
-	// Create API-backed issue repository that forwards to the remote backend
 	issueRepo := repository.NewAPIIssueRepository(backendURL, ghToken)
 
-	// Initialize local workspace manager
 	wsMgr, err := workspace.NewManager(cfg.Workspace.BasePath)
 	if err != nil {
 		slog.Error("initializing workspace manager", "error", err)
 		os.Exit(1)
 	}
 
-	// Initialize broadcaster and orchestrator (run agents locally)
 	broadcaster := api.NewBroadcaster()
 	orch := service.NewOrchestrator(wsMgr, issueRepo, cfg.Agent, cfg.Agent.APIKeys, broadcaster, ghToken, cfg.MaxConcurrency)
 	orch.Start()
 
-	// Serve the same API endpoints locally — Electron renderer talks to this
 	handler := api.NewHandler(issueRepo, nil, orch, cfg, broadcaster)
 	startServer(handler, cfg.APIPort, orch)
 }

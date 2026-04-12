@@ -69,7 +69,6 @@ func (p *codexProvider) RunStreaming(ctx context.Context, workspacePath, mode, i
 		result := RunResult{}
 		var outputParts []string
 
-		// Read stderr in background
 		go func() {
 			s := bufio.NewScanner(stderr)
 			for s.Scan() {
@@ -93,10 +92,8 @@ func (p *codexProvider) RunStreaming(ctx context.Context, workspacePath, mode, i
 				continue
 			}
 
-			// Try to parse as Codex JSONL
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(line), &parsed); err != nil {
-				// Not JSON — emit as plain text, check for PR URL
 				select {
 				case eventCh <- AgentEvent{Type: EventText, Timestamp: time.Now(), Prefix: "INFO", Content: strings.TrimSpace(line)}:
 				case <-ctx.Done():
@@ -152,7 +149,6 @@ func (p *codexProvider) RunStreaming(ctx context.Context, workspacePath, mode, i
 					command, _ := item["command"].(string)
 					status, _ := item["status"].(string)
 					if command != "" && status == "completed" {
-						// Shorten the command for display
 						short := command
 						if strings.HasPrefix(short, "/usr/bin/bash -lc ") {
 							short = strings.TrimPrefix(short, "/usr/bin/bash -lc ")
@@ -165,7 +161,6 @@ func (p *codexProvider) RunStreaming(ctx context.Context, workspacePath, mode, i
 						case eventCh <- AgentEvent{Type: EventTool, Timestamp: time.Now(), Prefix: "EXEC", Content: short}:
 						case <-ctx.Done():
 						}
-						// Check aggregated output for PR URLs
 						output, _ := item["aggregated_output"].(string)
 						if match := prRegex.FindString(output); match != "" {
 							result.PRURL = match

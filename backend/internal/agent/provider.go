@@ -7,13 +7,11 @@ import (
 	"auto-issue/internal/config"
 )
 
-// ProviderRunner abstracts CLI-based agent execution.
 type ProviderRunner interface {
 	RunStreaming(ctx context.Context, workspacePath, mode, issuePrompt string) (<-chan AgentEvent, <-chan RunResult, error)
 	Type() string
 }
 
-// ProviderConfig holds configuration for creating a provider.
 type ProviderConfig struct {
 	Type    string
 	Model   string
@@ -23,7 +21,6 @@ type ProviderConfig struct {
 	APIKeys map[string]string // "openai" -> key, "gemini" -> key
 }
 
-// NewProvider creates the appropriate ProviderRunner for the given agent type.
 func NewProvider(cfg ProviderConfig) (ProviderRunner, error) {
 	switch cfg.Type {
 	case "claude-code":

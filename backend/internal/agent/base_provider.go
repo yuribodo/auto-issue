@@ -15,7 +15,6 @@ import (
 
 var prRegex = regexp.MustCompile(`https://github\.com/.+/pull/\d+`)
 
-// buildPrompt constructs the agent prompt based on mode and system prompt.
 func buildPrompt(systemPrompt, mode, issuePrompt string) string {
 	var systemCtx string
 	if systemPrompt != "" {
@@ -32,7 +31,6 @@ func buildPrompt(systemPrompt, mode, issuePrompt string) string {
 	}
 }
 
-// spawnDirect starts a command without PTY (for providers that don't need it).
 func spawnDirect(ctx context.Context, command string, args []string, workspacePath string, env []string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = workspacePath
@@ -105,7 +103,6 @@ func (tb *textBufferer) Flush() {
 	}
 }
 
-// toolVerb maps tool names to short action verbs.
 func toolVerb(name string) string {
 	verbs := map[string]string{
 		"Read":      "READ",
@@ -129,7 +126,6 @@ func toolVerb(name string) string {
 	return strings.ToUpper(name)
 }
 
-// formatToolUse formats tool input into a concise description.
 func formatToolUse(name string, input map[string]any, workspacePath string) string {
 	shortPath := func(p string) string {
 		s := strings.ReplaceAll(p, workspacePath+"/", "")
@@ -187,8 +183,6 @@ func formatToolUse(name string, input map[string]any, workspacePath string) stri
 	}
 }
 
-// plainTextParser handles output from providers that emit plain text (not JSON).
-// It emits each non-empty line as an EventText and detects PR URLs.
 func plainTextParser(ctx context.Context, scanner *bufio.Scanner, eventCh chan<- AgentEvent, result *RunResult) {
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -213,7 +207,6 @@ func plainTextParser(ctx context.Context, scanner *bufio.Scanner, eventCh chan<-
 	}
 }
 
-// baseEnv returns the base environment variables with GH tokens.
 func baseEnv(ghToken string) []string {
 	env := os.Environ()
 	if ghToken != "" {

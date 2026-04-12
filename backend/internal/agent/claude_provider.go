@@ -87,8 +87,7 @@ func (p *claudeProvider) RunStreaming(ctx context.Context, workspacePath, mode, 
 
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(line), &parsed); err != nil {
-				// Not JSON — emit as raw log, check for PR URL
-				select {
+					select {
 				case eventCh <- AgentEvent{Type: EventText, Timestamp: time.Now(), Prefix: "INFO", Content: strings.TrimSpace(line)}:
 				case <-ctx.Done():
 				}
