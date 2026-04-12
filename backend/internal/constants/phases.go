@@ -1,4 +1,3 @@
-// Package constants defines shared domain constants used across the application.
 package constants
 
 const (
@@ -10,7 +9,6 @@ const (
 	PhaseFailed        = "failed"
 )
 
-// validTransitions defines which phase transitions are allowed.
 var validTransitions = map[string][]string{
 	PhaseBacklog:       {PhaseDeveloping},
 	PhaseDeveloping:    {PhaseCodeReviewing, PhaseFailed},
@@ -18,7 +16,6 @@ var validTransitions = map[string][]string{
 	PhaseHumanReview:   {PhaseDeveloping, PhaseDone},
 }
 
-// IsValidTransition checks whether moving from one phase to another is allowed.
 func IsValidTransition(from, to string) bool {
 	targets, ok := validTransitions[from]
 	if !ok {

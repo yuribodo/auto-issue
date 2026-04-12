@@ -205,7 +205,6 @@ func TestCreateIssue(t *testing.T) {
 func TestCreateIssueWithAgentType(t *testing.T) {
 	_, mux := setupTestHandler(t)
 
-	// Valid agent_type
 	w := doRequest(t, mux, "POST", "/api/v1/issues", map[string]any{
 		"title":       "Test with codex",
 		"description": "Use codex agent",
@@ -225,7 +224,6 @@ func TestCreateIssueWithAgentType(t *testing.T) {
 		t.Errorf("agent_model = %v, want o3-mini", resp["agent_model"])
 	}
 
-	// Invalid agent_type
 	w2 := doRequest(t, mux, "POST", "/api/v1/issues", map[string]any{
 		"title":       "Test with invalid",
 		"agent_type":  "invalid-provider",
@@ -489,7 +487,6 @@ func TestGetConfig(t *testing.T) {
 	}
 }
 
-// phasePath returns the sequence of transitions needed to reach the target phase from backlog.
 func phasePath(target string) []string {
 	switch target {
 	case constants.PhaseBacklog:

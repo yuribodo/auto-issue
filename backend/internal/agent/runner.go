@@ -7,8 +7,6 @@ import (
 	"auto-issue/internal/config"
 )
 
-// Runner executes the configured agent as a local subprocess.
-// It delegates to ClaudeProvider for backward compatibility.
 type Runner struct {
 	provider ProviderRunner
 	cfg      config.AgentConfig
@@ -26,7 +24,6 @@ func NewRunner(cfg config.AgentConfig, ghToken string) *Runner {
 	return &Runner{provider: provider, cfg: cfg, ghToken: ghToken}
 }
 
-// Run executes the agent synchronously (backward compat wrapper).
 func (r *Runner) Run(ctx context.Context, workspacePath string, mode string, issuePrompt string) (RunResult, error) {
 	events, resultCh, err := r.RunStreaming(ctx, workspacePath, mode, issuePrompt)
 	if err != nil {
@@ -47,12 +44,10 @@ func (r *Runner) Run(ctx context.Context, workspacePath string, mode string, iss
 	return result, nil
 }
 
-// RunStreaming executes the agent and returns channels for streaming events and final result.
 func (r *Runner) RunStreaming(ctx context.Context, workspacePath string, mode string, issuePrompt string) (<-chan AgentEvent, <-chan RunResult, error) {
 	return r.provider.RunStreaming(ctx, workspacePath, mode, issuePrompt)
 }
 
-// command returns the CLI command name (kept for tests).
 func (r *Runner) command() string {
 	switch r.cfg.Type {
 	case "claude-code":
@@ -62,7 +57,6 @@ func (r *Runner) command() string {
 	}
 }
 
-// buildStreamArgs returns CLI args (kept for tests).
 func (r *Runner) buildStreamArgs(prompt string) []string {
 	switch r.cfg.Type {
 	case "claude-code":
@@ -78,7 +72,6 @@ func (r *Runner) buildStreamArgs(prompt string) []string {
 	}
 }
 
-// buildPromptForRunner constructs the prompt (kept for tests).
 func (r *Runner) buildPrompt(mode string, issuePrompt string) string {
 	return buildPrompt(r.cfg.Prompt, mode, issuePrompt)
 }

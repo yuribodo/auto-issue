@@ -17,7 +17,6 @@ import (
 	"auto-issue/internal/workspace"
 )
 
-// noopBroadcaster implements EventBroadcaster for testing.
 type noopBroadcaster struct{}
 
 func (n *noopBroadcaster) Broadcast(issueID string, event agent.AgentEvent) {}
@@ -25,30 +24,24 @@ func (n *noopBroadcaster) Broadcast(issueID string, event agent.AgentEvent) {}
 func setupTestEnv(t *testing.T) (*Orchestrator, repository.IssueRepository, string) {
 	t.Helper()
 
-	// Create a fake repo with git init
 	repoDir := filepath.Join(t.TempDir(), "repo")
 	os.MkdirAll(repoDir, 0755)
 	initGitRepo(t, repoDir)
 
-	// Create a fake "claude" script that echoes the prompt
 	binDir := t.TempDir()
 	fakeAgent := filepath.Join(binDir, "claude")
 	os.WriteFile(fakeAgent, []byte("#!/bin/sh\necho \"Agent output for: $*\""), 0755)
 
-	// Add fake agent to PATH
 	os.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
-	// Issue repository (in-memory)
 	issueRepo := repository.NewMemoryIssueRepository()
 
-	// Workspace manager
 	wsBase := filepath.Join(t.TempDir(), "workspaces")
 	ws, err := workspace.NewManager(wsBase)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	// Agent config with short timeout
 	agentCfg := config.AgentConfig{
 		Type:    "claude-code",
 		Model:   "test-model",
@@ -84,7 +77,7 @@ func TestProcessIssueFullCycle(t *testing.T) {
 	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir, "testuser")
 	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 
-	err := orch.processIssue("issue-1")
+	err := orch.processIssue("issue-1", "")
 	if err != nil {
 		t.Fatalf("processIssue: %v", err)
 	}
@@ -108,7 +101,7 @@ func TestProcessIssueWithFeedback(t *testing.T) {
 
 	repo.Create(ctx, "issue-1", "Add feature", "Implement the feature", repoDir, "testuser")
 	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
-	orch.processIssue("issue-1")
+	orch.processIssue("issue-1", "")
 
 	err := repo.SetFeedback(ctx, "issue-1", "Add unit tests please", 3)
 	if err != nil {
@@ -120,7 +113,7 @@ func TestProcessIssueWithFeedback(t *testing.T) {
 		t.Fatalf("phase after feedback = %s, want developing", issue.Phase)
 	}
 
-	err = orch.processIssue("issue-1")
+	err = orch.processIssue("issue-1", "")
 	if err != nil {
 		t.Fatalf("processIssue iteration 2: %v", err)
 	}
@@ -139,7 +132,7 @@ func TestProcessIssueWrongPhase(t *testing.T) {
 	defer orch.Shutdown()
 
 	repo.Create(context.Background(), "issue-1", "Feature", "Desc", repoDir, "testuser")
-	err := orch.processIssue("issue-1")
+	err := orch.processIssue("issue-1", "")
 	if err == nil {
 		t.Fatal("expected error for wrong phase")
 	}
@@ -154,7 +147,7 @@ func TestEnqueueAndProcess(t *testing.T) {
 	repo.Create(ctx, "issue-1", "Feature", "Build it", repoDir, "testuser")
 	repo.Transition(ctx, "issue-1", constants.PhaseDeveloping)
 
-	orch.Enqueue("issue-1")
+	orch.Enqueue("issue-1", "")
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -177,7 +170,7 @@ func TestConcurrentIssues(t *testing.T) {
 		id := fmt.Sprintf("issue-%d", i)
 		repo.Create(ctx, id, fmt.Sprintf("Feature %d", i), "Build it", repoDir, "testuser")
 		repo.Transition(ctx, id, constants.PhaseDeveloping)
-		orch.Enqueue(id)
+		orch.Enqueue(id, "")
 	}
 
 	deadline := time.Now().Add(15 * time.Second)

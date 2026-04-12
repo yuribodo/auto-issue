@@ -10,21 +10,17 @@ import (
 	"auto-issue/internal/agent"
 )
 
-// Broadcaster manages SSE subscriptions per issue.
 type Broadcaster struct {
 	mu   sync.RWMutex
 	subs map[string]map[chan agent.AgentEvent]struct{}
 }
 
-// NewBroadcaster creates a new Broadcaster.
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
 		subs: make(map[string]map[chan agent.AgentEvent]struct{}),
 	}
 }
 
-// Subscribe returns a channel that receives events for the given issue
-// and an unsubscribe function.
 func (b *Broadcaster) Subscribe(issueID string) (<-chan agent.AgentEvent, func()) {
 	ch := make(chan agent.AgentEvent, 64)
 
@@ -48,8 +44,7 @@ func (b *Broadcaster) Subscribe(issueID string) (<-chan agent.AgentEvent, func()
 	return ch, unsub
 }
 
-// Broadcast sends an event to all subscribers of the given issue.
-// Non-blocking: if a subscriber's channel is full, the event is dropped for that subscriber.
+// Non-blocking: drops events for slow consumers.
 func (b *Broadcaster) Broadcast(issueID string, event agent.AgentEvent) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -63,7 +58,6 @@ func (b *Broadcaster) Broadcast(issueID string, event agent.AgentEvent) {
 	}
 }
 
-// ServeSSE handles the SSE endpoint for streaming issue events.
 func (b *Broadcaster) ServeSSE(w http.ResponseWriter, r *http.Request, issueID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -81,11 +75,9 @@ func (b *Broadcaster) ServeSSE(w http.ResponseWriter, r *http.Request, issueID s
 	ch, unsub := b.Subscribe(issueID)
 	defer unsub()
 
-	// Send initial keepalive
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
-	// Keepalive ticker
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 

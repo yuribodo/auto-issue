@@ -50,7 +50,6 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.Duration.String())
 }
 
-// Default returns a Config with all default values applied.
 func Default() *Config {
 	cfg := &Config{}
 	cfg.applyDefaults()

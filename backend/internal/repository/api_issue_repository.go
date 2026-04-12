@@ -1,5 +1,3 @@
-// Package repository provides data access implementations.
-// api_issue_repository.go implements IssueRepository via HTTP calls to a remote API.
 package repository
 
 import (
@@ -15,15 +13,12 @@ import (
 	"auto-issue/internal/models"
 )
 
-// APIIssueRepository implements IssueRepository by calling a remote REST API.
-// Used in agent mode where the local binary talks to the remote Render backend.
 type APIIssueRepository struct {
 	baseURL    string
 	authToken  string
 	httpClient *http.Client
 }
 
-// NewAPIIssueRepository creates a new HTTP-backed issue repository.
 func NewAPIIssueRepository(baseURL string, authToken string) *APIIssueRepository {
 	return &APIIssueRepository{
 		baseURL:   baseURL,
@@ -34,7 +29,6 @@ func NewAPIIssueRepository(baseURL string, authToken string) *APIIssueRepository
 	}
 }
 
-// Compile-time interface verification.
 var _ IssueRepository = (*APIIssueRepository)(nil)
 
 func (r *APIIssueRepository) doRequest(ctx context.Context, method, path string, body any) (*http.Response, error) {

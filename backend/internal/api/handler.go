@@ -1,5 +1,3 @@
-// Package api provides HTTP handlers that wire the frontend
-// to the backend by exposing REST endpoints for Kanban board operations.
 package api
 
 import (
@@ -7,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
-	"time"
-
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
 
 	"auto-issue/internal/config"
 	"auto-issue/internal/constants"
@@ -19,19 +19,16 @@ import (
 	"auto-issue/internal/service"
 )
 
-// Handler serves the auto-issue REST API, delegating to the repository
-// and orchestrator for issue lifecycle management.
 type Handler struct {
 	issues      repository.IssueRepository
 	configRepo  repository.ConfigRepository
 	orch        *service.Orchestrator
 	config      *config.Config
+	configMu    sync.RWMutex
 	broadcaster *Broadcaster
 	startTime   time.Time
 }
 
-// NewHandler creates a Handler wired to the given dependencies.
-// orch and broadcaster may be nil for API-only deployments (no agent execution).
 func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigRepository, orch *service.Orchestrator, cfg *config.Config, broadcaster *Broadcaster) *Handler {
 	return &Handler{
 		issues:      issues,
@@ -43,7 +40,6 @@ func NewHandler(issues repository.IssueRepository, configRepo repository.ConfigR
 	}
 }
 
-// RegisterRoutes registers all API v1 endpoints on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/status", h.handleStatus)
 	mux.HandleFunc("/api/v1/issues", h.handleIssues)
@@ -123,7 +119,6 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate agent_type if provided
 	if req.AgentType != "" {
 		validTypes := map[string]bool{"claude-code": true, "codex": true, "gemini": true}
 		if !validTypes[req.AgentType] {
@@ -146,7 +141,6 @@ func (h *Handler) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set agent type/model if specified
 	if req.AgentType != "" || req.AgentModel != "" {
 		if err := h.issues.UpdateAgentInfo(r.Context(), issue.IssueID, req.AgentType, req.AgentModel); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
@@ -234,20 +228,17 @@ func (h *Handler) cancelIssue(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	// Only cancel issues that are actively running
 	if issue.Phase != constants.PhaseDeveloping && issue.Phase != constants.PhaseCodeReviewing {
 		writeError(w, http.StatusConflict, "invalid_phase", fmt.Sprintf("cannot cancel issue in phase %s", issue.Phase))
 		return
 	}
 
-	// Cancel the agent process
 	if h.orch == nil {
 		writeError(w, http.StatusServiceUnavailable, "agent_unavailable", "agent execution is not available on this server")
 		return
 	}
 	h.orch.CancelIssue(id)
 
-	// Transition to failed
 	if err := h.issues.Transition(r.Context(), id, constants.PhaseFailed); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -354,10 +345,13 @@ func (h *Handler) submitFeedback(w http.ResponseWriter, r *http.Request, id stri
 
 	ctx := r.Context()
 
-	// Use max_iterations from request if provided, otherwise fall back to config
 	maxIter := req.MaxIterations
-	if maxIter <= 0 && h.config != nil {
-		maxIter = h.config.Agent.MaxIterations
+	if maxIter <= 0 {
+		h.configMu.RLock()
+		if h.config != nil {
+			maxIter = h.config.Agent.MaxIterations
+		}
+		h.configMu.RUnlock()
 	}
 	if maxIter <= 0 {
 		maxIter = 3 // sensible default
@@ -395,7 +389,6 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
-	// Verify issue exists
 	if _, err := h.issues.Get(r.Context(), id); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
@@ -414,7 +407,10 @@ func (h *Handler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.config)
+	h.configMu.RLock()
+	cfg := h.config
+	h.configMu.RUnlock()
+	writeJSON(w, http.StatusOK, cfg)
 }
 
 func (h *Handler) handleConfigReload(w http.ResponseWriter, r *http.Request) {
@@ -429,7 +425,9 @@ func (h *Handler) handleConfigReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.configMu.Lock()
 	h.config = cfg
+	h.configMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"message": "Config reloaded successfully",
@@ -453,7 +451,11 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	// Get diff stat
+	if err := validateWorkspacePath(issue.WorkspacePath); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_workspace", err.Error())
+		return
+	}
+
 	statCmd := exec.Command("git", "diff", "HEAD~1", "--stat")
 	statCmd.Dir = issue.WorkspacePath
 	statOutput, err := statCmd.Output()
@@ -462,7 +464,6 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	// Get full diff
 	diffCmd := exec.Command("git", "diff", "HEAD~1")
 	diffCmd.Dir = issue.WorkspacePath
 	diffOutput, err := diffCmd.Output()
@@ -471,7 +472,6 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	// Parse diff into structured response
 	type DiffFile struct {
 		Path      string `json:"path"`
 		Status    string `json:"status"`
@@ -490,7 +490,6 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 	totalAdded := 0
 	totalRemoved := 0
 
-	// Parse the unified diff output into per-file patches
 	diffStr := string(diffOutput)
 	fileDiffs := strings.Split(diffStr, "diff --git ")
 
@@ -504,7 +503,6 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 			continue
 		}
 
-		// Extract file path from "a/path b/path"
 		parts := strings.Fields(lines[0])
 		filePath := ""
 		if len(parts) >= 2 {
@@ -554,8 +552,6 @@ func (h *Handler) getDiff(w http.ResponseWriter, r *http.Request, id string) {
 	})
 }
 
-// transitionIssue handles direct phase transitions used by the agent runner's APIIssueRepository.
-// Unlike moveIssue which only supports "in_progress" and "done", this supports all valid transitions.
 func (h *Handler) transitionIssue(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only PUT is allowed")
@@ -589,6 +585,11 @@ func (h *Handler) startDeveloping(w http.ResponseWriter, r *http.Request, id str
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	if err := validateWorkspacePath(req.WorkspacePath); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_workspace", err.Error())
 		return
 	}
 
@@ -691,6 +692,25 @@ func (h *Handler) updateAgentInfo(w http.ResponseWriter, r *http.Request, id str
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
+func validateWorkspacePath(wsPath string) error {
+	cleaned := filepath.Clean(wsPath)
+	if !filepath.IsAbs(cleaned) {
+		return fmt.Errorf("workspace path must be absolute")
+	}
+	info, err := os.Stat(cleaned)
+	if err != nil {
+		return fmt.Errorf("workspace path does not exist: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("workspace path is not a directory")
+	}
+	gitDir := filepath.Join(cleaned, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		return fmt.Errorf("workspace path is not a git repository")
+	}
+	return nil
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -711,8 +731,6 @@ func writeError(w http.ResponseWriter, status int, code string, message string) 
 	}
 }
 
-// extractGHToken pulls the GitHub token from the Authorization header.
-// Supports "Bearer <token>" and "token <token>" formats.
 func extractGHToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth == "" {

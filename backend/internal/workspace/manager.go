@@ -31,18 +31,13 @@ func NewManager(basePath string) (*Manager, error) {
 	return &Manager{basePath: abs, clonePath: cloneDir}, nil
 }
 
-// Create initializes a workspace for the given issue using git worktree.
-// For local repos, it creates a worktree from the repo.
-// If the workspace already exists, it returns the existing path (idempotent).
 func (m *Manager) Create(issueID string, repoPath string) (string, error) {
 	wsPath := m.Path(issueID)
 
-	// Idempotent: if workspace already exists, reuse it
 	if info, err := os.Stat(wsPath); err == nil && info.IsDir() {
 		return wsPath, nil
 	}
 
-	// Validate repo path exists
 	info, err := os.Stat(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("repo path %q: %w", repoPath, err)
@@ -51,7 +46,6 @@ func (m *Manager) Create(issueID string, repoPath string) (string, error) {
 		return "", fmt.Errorf("repo path %q is not a directory", repoPath)
 	}
 
-	// Create worktree from the local repo
 	branch := fmt.Sprintf("auto-issue/%s", issueID)
 	cmd := exec.Command("git", "worktree", "add", "-b", branch, wsPath, "HEAD")
 	cmd.Dir = repoPath
@@ -63,23 +57,18 @@ func (m *Manager) Create(issueID string, repoPath string) (string, error) {
 	return wsPath, nil
 }
 
-// CreateFromRemote initializes a workspace for a GitHub repo.
-// It maintains a base clone in ~/.auto-issue/clones/ and creates worktrees from it.
 func (m *Manager) CreateFromRemote(issueID string, repo string, ghToken string) (string, error) {
 	wsPath := m.Path(issueID)
 
-	// Idempotent
 	if info, err := os.Stat(wsPath); err == nil && info.IsDir() {
 		return wsPath, nil
 	}
 
-	// Ensure we have a base clone
 	cloneDir, err := m.ensureClone(repo, ghToken)
 	if err != nil {
 		return "", fmt.Errorf("ensuring clone: %w", err)
 	}
 
-	// Fetch latest
 	fetchCmd := exec.Command("git", "fetch", "origin")
 	fetchCmd.Dir = cloneDir
 	fetchCmd.Env = append(os.Environ(), fmt.Sprintf("GH_TOKEN=%s", ghToken), fmt.Sprintf("GITHUB_TOKEN=%s", ghToken))
@@ -87,7 +76,6 @@ func (m *Manager) CreateFromRemote(issueID string, repo string, ghToken string) 
 		return "", fmt.Errorf("git fetch: %s: %w", string(output), err)
 	}
 
-	// Create worktree
 	branch := fmt.Sprintf("auto-issue/%s", issueID)
 	cmd := exec.Command("git", "worktree", "add", "-b", branch, wsPath, "origin/HEAD")
 	cmd.Dir = cloneDir
@@ -99,9 +87,7 @@ func (m *Manager) CreateFromRemote(issueID string, repo string, ghToken string) 
 	return wsPath, nil
 }
 
-// ensureClone ensures a base clone exists for the given repo.
 func (m *Manager) ensureClone(repo string, ghToken string) (string, error) {
-	// Sanitize repo name for directory
 	safeName := strings.ReplaceAll(repo, "/", "--")
 	cloneDir := filepath.Join(m.clonePath, safeName)
 
@@ -126,12 +112,10 @@ func (m *Manager) ensureClone(repo string, ghToken string) (string, error) {
 	return cloneDir, nil
 }
 
-// Path returns the deterministic workspace path for a given issue.
 func (m *Manager) Path(issueID string) string {
 	return filepath.Join(m.basePath, issueID)
 }
 
-// Cleanup removes the workspace worktree and branch for an issue.
 func (m *Manager) Cleanup(issueID string) error {
 	wsPath := m.Path(issueID)
 
@@ -139,8 +123,6 @@ func (m *Manager) Cleanup(issueID string) error {
 		return nil // already gone
 	}
 
-	// Try to remove as worktree first
-	// Find the parent repo by checking .git file in worktree
 	gitFile := filepath.Join(wsPath, ".git")
 	if data, err := os.ReadFile(gitFile); err == nil {
 		// .git file in worktree contains "gitdir: /path/to/repo/.git/worktrees/..."
@@ -170,14 +152,12 @@ func (m *Manager) Cleanup(issueID string) error {
 		}
 	}
 
-	// Fallback: just remove the directory
 	if err := os.RemoveAll(wsPath); err != nil {
 		return fmt.Errorf("removing workspace %q: %w", wsPath, err)
 	}
 	return nil
 }
 
-// Exists checks if a workspace directory exists for the given issue.
 func (m *Manager) Exists(issueID string) bool {
 	info, err := os.Stat(m.Path(issueID))
 	return err == nil && info.IsDir()

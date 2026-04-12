@@ -10,20 +10,17 @@ import (
 	"auto-issue/internal/models"
 )
 
-// MemoryIssueRepository is an in-memory IssueRepository used for testing.
 type MemoryIssueRepository struct {
 	mu     sync.RWMutex
 	issues map[string]*models.Issue
 }
 
-// NewMemoryIssueRepository creates a new in-memory issue repository.
 func NewMemoryIssueRepository() *MemoryIssueRepository {
 	return &MemoryIssueRepository{
 		issues: make(map[string]*models.Issue),
 	}
 }
 
-// Compile-time interface verification.
 var _ IssueRepository = (*MemoryIssueRepository)(nil)
 
 func (r *MemoryIssueRepository) nextRunNumber(githubUser string) int {

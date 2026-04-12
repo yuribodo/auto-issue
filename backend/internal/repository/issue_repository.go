@@ -1,4 +1,3 @@
-// Package repository provides data access implementations backed by PostgreSQL.
 package repository
 
 import (
@@ -12,7 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// IssueRepository defines the data access contract for issues.
 type IssueRepository interface {
 	Create(ctx context.Context, id, title, description, repoPath, githubUser string) (*models.Issue, error)
 	CreateWithGithub(ctx context.Context, id, title, description, repoPath, githubRepo string, issueNumber int, githubUser string) (*models.Issue, error)
@@ -28,17 +26,14 @@ type IssueRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
-// PGIssueRepository implements IssueRepository backed by PostgreSQL via GORM.
 type PGIssueRepository struct {
 	db *gorm.DB
 }
 
-// NewPGIssueRepository creates a new PostgreSQL-backed issue repository.
 func NewPGIssueRepository(db *gorm.DB) *PGIssueRepository {
 	return &PGIssueRepository{db: db}
 }
 
-// Compile-time interface verification.
 var _ IssueRepository = (*PGIssueRepository)(nil)
 
 func (r *PGIssueRepository) nextRunNumber(ctx context.Context, githubUser string) int {
